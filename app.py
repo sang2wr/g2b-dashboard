@@ -1,12 +1,11 @@
 """나라장터 입찰공고 대시보드"""
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 
-from api_client import fetch_notices, sample_data
+from api_client import fetch_notices
 
-# API 키 로드 (Streamlit Secrets → .env 순서로 시도)
 def _load_env_key() -> str:
     try:
         return st.secrets.get("G2B_API_KEY", "") or ""
@@ -22,7 +21,6 @@ def _load_env_key() -> str:
 
 DEFAULT_API_KEY = _load_env_key()
 
-# ── 페이지 설정 ──────────────────────────────────────────────────
 st.set_page_config(
     page_title="나라장터 공고 대시보드",
     page_icon="📋",
@@ -51,31 +49,36 @@ st.markdown("""
   margin-bottom: 16px;
 }
 
+/* ── 조회 폼 박스 ── */
+.search-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+}
+
 /* ── 모바일 공통 ── */
 @media (max-width: 768px) {
   .metric-title { font-size: 12px; }
   .metric-value { font-size: 22px; }
 
-  /* 탭 레이블 작게 */
   .stTabs [data-baseweb="tab"] {
     font-size: 13px !important;
     padding: 8px 8px !important;
   }
 
-  /* 버튼 터치 타겟 크게 */
   .stButton > button {
     min-height: 48px !important;
     font-size: 16px !important;
   }
 
-  /* 텍스트 입력 터치 타겟 */
   .stTextInput > div > div > input,
   .stTextArea textarea,
   .stSelectbox > div > div {
-    font-size: 16px !important; /* iOS 자동 줌 방지 */
+    font-size: 16px !important;
   }
 
-  /* 테이블 가로 스크롤 */
   .stDataFrame { overflow-x: auto; }
 }
 </style>
@@ -83,16 +86,6 @@ st.markdown("""
 
 
 # ── 헬퍼 함수 ────────────────────────────────────────────────────
-def _dday_label(dday) -> str:
-    if dday is None:
-        return "-"
-    try:
-        d = int(dday)
-        return f"D-{abs(d)}" if d <= 0 else f"D-{d}"
-    except Exception:
-        return "-"
-
-
 def _amt_str(amt) -> str:
     try:
         v = int(amt or 0)
@@ -117,7 +110,6 @@ def show_table(data: pd.DataFrame, show_all: bool = True):
     df["마감일"] = df["입찰마감"].astype(str).str[:10]
     df["공고일"] = df["공고일시"].astype(str).str[:10]
 
-    # ── 결과 내 검색 & 정렬 ──────────────────────────────────────
     q = st.text_input(
         "결과 내 검색",
         placeholder="공고명 · 기관명으로 필터...",
@@ -159,34 +151,24 @@ def show_table(data: pd.DataFrame, show_all: bool = True):
     show_cols  = base_cols + extra_cols
 
     col_cfg = {
-        "공고일":       st.column_config.TextColumn("공고일",    width=90),
-        "공고번호":     st.column_config.TextColumn("공고번호",  width=140),
-        "공고명":       st.column_config.TextColumn("공고명",    width="large"),
-        "공고기관":     st.column_config.TextColumn("공고기관",  width=150),
-        "추정가격_표시":st.column_config.TextColumn("추정가격",  width=90),
-        "마감일":       st.column_config.TextColumn("마감일",    width=90),
-        "마감D-Day":    st.column_config.NumberColumn("D-Day",   width=60, format="%d일"),
-        "공고링크":     st.column_config.LinkColumn(
-                            "바로가기",
-                            display_text="→ 공고",
-                            width=80,
-                        ),
-        "수요기관":     st.column_config.TextColumn("수요기관"),
-        "담당자":       st.column_config.TextColumn("담당자",    width=80),
-        "담당자연락처": st.column_config.TextColumn("연락처",    width=120),
+        "공고일":        st.column_config.TextColumn("공고일",   width=90),
+        "공고번호":      st.column_config.TextColumn("공고번호", width=140),
+        "공고명":        st.column_config.TextColumn("공고명",   width="large"),
+        "공고기관":      st.column_config.TextColumn("공고기관", width=150),
+        "추정가격_표시": st.column_config.TextColumn("추정가격", width=90),
+        "마감일":        st.column_config.TextColumn("마감일",   width=90),
+        "마감D-Day":     st.column_config.NumberColumn("D-Day",  width=60, format="%d일"),
+        "공고링크":      st.column_config.LinkColumn("바로가기", display_text="→ 공고", width=80),
+        "수요기관":      st.column_config.TextColumn("수요기관"),
+        "담당자":        st.column_config.TextColumn("담당자",   width=80),
+        "담당자연락처":  st.column_config.TextColumn("연락처",   width=120),
     }
 
-    # 행 수에 따라 높이 동적 조정 (최소 400, 최대 1400)
     row_h = 35
     tbl_h = min(max(400, 38 + len(df) * row_h), 1400)
 
-    st.dataframe(
-        df[show_cols],
-        column_config=col_cfg,
-        hide_index=True,
-        use_container_width=True,
-        height=tbl_h,
-    )
+    st.dataframe(df[show_cols], column_config=col_cfg, hide_index=True,
+                 use_container_width=True, height=tbl_h)
 
     csv = data.to_csv(index=False, encoding="utf-8-sig")
     st.download_button(
@@ -225,49 +207,12 @@ def show_stats(data: pd.DataFrame):
         st.bar_chart(daily)
 
 
-# ── 사이드바 ─────────────────────────────────────────────────────
-with st.sidebar:
-    st.title("🔍 조회 조건")
+# ── 메인 ─────────────────────────────────────────────────────────
+st.title("📋 나라장터 입찰공고 대시보드")
 
-    st.subheader("📌 키워드 (OR 검색)")
-    kw_input = st.text_area(
-        "키워드 (쉼표 구분)",
-        value="스마트, 경로당, AI, 교육, 박람회",
-        height=100,
-        help="공고명에 하나라도 포함되면 결과에 포함",
-        label_visibility="collapsed",
-        placeholder="스마트, 경로당, AI, 교육...",
-    )
-    keywords = [k.strip() for k in kw_input.split(",") if k.strip()]
-
-    st.caption("💰 최소 추정가격")
-    min_amount_man = st.number_input(
-        "만원",
-        value=1000, min_value=0, step=500,
-        label_visibility="collapsed",
-    )
-    min_amount = min_amount_man * 10_000
-    st.caption(f"{min_amount_man:,}만원 이상")
-
-    st.caption("📅 게시 기간")
-    days = st.number_input(
-        "일",
-        value=7, min_value=1, max_value=60, step=1,
-        label_visibility="collapsed",
-    )
-    st.caption(f"최근 {days}일")
-
-    st.caption("🚫 제외 키워드")
-    excl_input = st.text_input(
-        "제외",
-        value="시담",
-        placeholder="시담, 재공고...",
-        label_visibility="collapsed",
-    )
-    exclude_words = [e.strip() for e in excl_input.split(",") if e.strip()]
-
-    st.divider()
-    search_btn = st.button("🔄 공고 조회", use_container_width=True, type="primary")
+# ── 조회 폼 ──────────────────────────────────────────────────────
+with st.form("search_form"):
+    st.subheader("🔍 조회 조건")
 
     with st.expander("🔑 API 키 설정"):
         api_key = st.text_input(
@@ -275,81 +220,90 @@ with st.sidebar:
             value=DEFAULT_API_KEY,
             type="password",
             placeholder="발급받은 API 키 입력",
-            help="data.go.kr → 조달청_나라장터 입찰공고정보서비스 활용신청 후 발급",
+            help="data.go.kr → 나라장터 입찰공고정보서비스 활용신청 후 발급",
         )
         st.markdown("""
-**발급 방법**
-1. [data.go.kr](https://www.data.go.kr) 로그인
-2. `나라장터 입찰공고` 검색
-3. **나라장터 입찰공고정보 서비스** → 활용신청
-4. 마이페이지 → 인증키 관리 → `Decoding 키` 복사
+**발급 방법**: [data.go.kr](https://www.data.go.kr) 로그인 → `나라장터 입찰공고` 검색 → 활용신청 → 마이페이지 → 인증키 관리 → `Decoding 키` 복사
         """)
 
-# ── 메인 ─────────────────────────────────────────────────────────
-st.title("📋 나라장터 입찰공고 대시보드")
-
-# 초기 샘플 로드
-if "df" not in st.session_state:
-    st.session_state.df       = sample_data()
-    st.session_state.is_sample = True
-
-# 조회 버튼 처리
-if search_btn:
-    if not api_key:
-        with st.spinner("샘플 데이터 필터링 중..."):
-            df = sample_data()
-            if exclude_words:
-                df = df[~df["공고명"].str.contains("|".join(exclude_words), na=False)]
-            if keywords:
-                df = df[df["공고명"].str.contains("|".join(keywords), na=False)]
-            df = df[df["추정가격"] >= min_amount]
-        st.session_state.df        = df
-        st.session_state.is_sample = True
-        st.warning("⚠️ API 키 없음 → 샘플 데이터로 표시합니다.")
-    else:
-        with st.spinner("나라장터에서 공고를 가져오는 중..."):
-            df = fetch_notices(
-                api_key=api_key,
-                keywords=keywords,
-                min_amount=min_amount,
-                days=days,
-                exclude_words=exclude_words,
-            )
-        st.session_state.df        = df
-        st.session_state.is_sample = False
-    st.session_state.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    st.rerun()
-
-df: pd.DataFrame = st.session_state.df
-is_sample: bool  = st.session_state.get("is_sample", True)
-
-# 상태 표시
-status_col, time_col = st.columns([5, 1])
-with time_col:
-    if "last_updated" in st.session_state:
-        st.caption(f"조회: {st.session_state.last_updated}")
-
-if is_sample:
-    st.info("📌 **샘플 데이터** 표시 중 — 왼쪽에 API 키 입력 후 '공고 조회'를 누르면 실시간 데이터를 불러옵니다.")
-
-st.caption("💡 **공고 링크**: 나라장터 **로그아웃** 상태에서 클릭하면 공고 페이지로 바로 이동합니다. 로그인 상태라면 공고번호를 복사해 나라장터에서 직접 검색하세요.")
-
-# ── 요약 카드 ────────────────────────────────────────────────────
-if not df.empty:
-    today = datetime.now()
-
-    df = df.copy()
-    df["마감D-Day"] = df["입찰마감"].apply(
-        lambda x: int((pd.to_datetime(x, errors="coerce") - today).days)
-        if pd.notnull(pd.to_datetime(x, errors="coerce")) else None
+    kw_input = st.text_area(
+        "키워드 (쉼표로 구분, OR 검색)",
+        value="",
+        height=80,
+        placeholder="예) 스마트, 경로당, AI, 교육, 박람회",
     )
 
-    total        = len(df)
-    d3           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 3) & (df["마감D-Day"] >= 0)).sum())
-    d7           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)).sum())
-    total_amount = df["추정가격"].sum()
+    c1, c2 = st.columns(2)
+    with c1:
+        min_amount_man = st.number_input(
+            "최소 추정가격 (만원, 0=전체)",
+            value=0, min_value=0, step=500,
+        )
+    with c2:
+        days = st.number_input(
+            "게시 기간 (일)",
+            value=7, min_value=1, max_value=60, step=1,
+        )
 
-    st.markdown(f"""
+    excl_input = st.text_input(
+        "제외 키워드 (쉼표로 구분)",
+        value="",
+        placeholder="예) 시담, 재공고",
+    )
+
+    submitted = st.form_submit_button("🔄 공고 조회", use_container_width=True, type="primary")
+
+# ── 조회 처리 ─────────────────────────────────────────────────────
+if submitted:
+    keywords     = [k.strip() for k in kw_input.split(",") if k.strip()]
+    exclude_words = [e.strip() for e in excl_input.split(",") if e.strip()]
+    min_amount   = min_amount_man * 10_000
+
+    if not api_key:
+        st.error("🔑 API 키를 입력해주세요. 위의 'API 키 설정'을 열어 입력하세요.")
+        st.stop()
+
+    with st.spinner("나라장터에서 공고를 가져오는 중..."):
+        df = fetch_notices(
+            api_key=api_key,
+            keywords=keywords,
+            min_amount=min_amount,
+            days=days,
+            exclude_words=exclude_words,
+        )
+    st.session_state.df           = df
+    st.session_state.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# ── 결과 표시 ─────────────────────────────────────────────────────
+if "df" not in st.session_state:
+    st.info("⬆️ 조회 조건을 입력하고 **공고 조회** 버튼을 눌러주세요.")
+    st.stop()
+
+df: pd.DataFrame = st.session_state.df
+
+if "last_updated" in st.session_state:
+    st.caption(f"조회 시각: {st.session_state.last_updated}")
+
+st.caption("💡 **공고 링크**: 나라장터 **로그아웃** 상태에서 클릭하면 공고 페이지로 바로 이동합니다. 로그인 상태라면 공고번호로 직접 검색하세요.")
+
+if df.empty:
+    st.warning("조건에 맞는 공고가 없습니다. 키워드나 기간을 조정해보세요.")
+    st.stop()
+
+# ── 요약 카드 ────────────────────────────────────────────────────
+today = datetime.now()
+df = df.copy()
+df["마감D-Day"] = df["입찰마감"].apply(
+    lambda x: int((pd.to_datetime(x, errors="coerce") - today).days)
+    if pd.notnull(pd.to_datetime(x, errors="coerce")) else None
+)
+
+total        = len(df)
+d3           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 3) & (df["마감D-Day"] >= 0)).sum())
+d7           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)).sum())
+total_amount = df["추정가격"].sum()
+
+st.markdown(f"""
 <div class="metrics-grid">
   <div class="metric-card">
     <p class="metric-title">전체 공고 수</p>
@@ -370,24 +324,20 @@ if not df.empty:
 </div>
 """, unsafe_allow_html=True)
 
-    st.divider()
+st.divider()
 
-    tab1, tab2, tab3 = st.tabs(["📋 전체 목록", "🚨 마감 임박 (7일)", "📊 통계"])
+tab1, tab2, tab3 = st.tabs(["📋 전체 목록", "🚨 마감 임박 (7일)", "📊 통계"])
 
-    with tab1:
-        show_table(df, show_all=True)
+with tab1:
+    show_table(df, show_all=True)
 
-    with tab2:
-        urgent = df[df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)].sort_values("마감D-Day")
-        if urgent.empty:
-            st.success("✅ 7일 이내 마감 공고가 없습니다.")
-        else:
-            st.warning(f"마감 7일 이내 공고 **{len(urgent)}건** — 빨리 확인하세요!")
-            show_table(urgent, show_all=False)
+with tab2:
+    urgent = df[df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)].sort_values("마감D-Day")
+    if urgent.empty:
+        st.success("✅ 7일 이내 마감 공고가 없습니다.")
+    else:
+        st.warning(f"마감 7일 이내 공고 **{len(urgent)}건** — 빨리 확인하세요!")
+        show_table(urgent, show_all=False)
 
-    with tab3:
-        show_stats(df)
-
-else:
-    st.markdown("### 조건에 맞는 공고가 없습니다.")
-    st.caption("왼쪽 사이드바에서 조건을 변경하고 **공고 조회** 버튼을 눌러주세요.")
+with tab3:
+    show_stats(df)
