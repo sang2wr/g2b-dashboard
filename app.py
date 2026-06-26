@@ -4,10 +4,9 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 
+from concurrent.futures import ThreadPoolExecutor
 from api_client import fetch_notices, sample_data
 import proxy as _proxy
-
-_proxy.ensure_running()
 
 # API 키 로드 (Streamlit Secrets → .env 순서로 시도)
 def _load_env_key() -> str:
@@ -69,13 +68,7 @@ def _amt_str(amt) -> str:
 
 def show_table(data: pd.DataFrame, show_all: bool = True):
     df = data.copy()
-
-    def _g2b_url(row):
-        bid_no  = str(row.get("공고번호", "") or "")
-        bid_ord = str(row.get("bidNtceOrd", "000") or "000")
-        return f"{_proxy.PROXY_BASE}/?no={bid_no}&ord={bid_ord}" if bid_no else ""
-
-    df["공고링크"] = df.apply(_g2b_url, axis=1)
+    df["공고링크"] = df["_resolved_url"] if "_resolved_url" in df.columns else ""
     df["추정가격_표시"] = df["추정가격"].apply(_amt_str)
     df["마감일"] = df["입찰마감"].astype(str).str[:10]
     df["공고일"] = df["공고일시"].astype(str).str[:10]
@@ -197,6 +190,25 @@ with st.sidebar:
 # ── 메인 ─────────────────────────────────────────────────────────
 st.title("📋 나라장터 입찰공고 대시보드")
 
+def _resolve_urls(df: pd.DataFrame) -> pd.DataFrame:
+    """공고번호 기준으로 실제 공고 URL을 서버 사이드에서 병렬 해석."""
+    if df.empty:
+        return df
+    rows = df[["공고번호"] + (["bidNtceOrd"] if "bidNtceOrd" in df.columns else [])].to_dict("records")
+
+    def resolve(r):
+        bid_no  = str(r.get("공고번호", "") or "")
+        bid_ord = str(r.get("bidNtceOrd", "000") or "000")
+        return _proxy.resolve_notice_url(bid_no, bid_ord) if bid_no else ""
+
+    with ThreadPoolExecutor(max_workers=20) as ex:
+        urls = list(ex.map(resolve, rows))
+
+    df = df.copy()
+    df["_resolved_url"] = urls
+    return df
+
+
 # 초기 샘플 로드
 if "df" not in st.session_state:
     st.session_state.df       = sample_data()
@@ -224,6 +236,8 @@ if search_btn:
                 days=days,
                 exclude_words=exclude_words,
             )
+        with st.spinner("공고 링크 준비 중..."):
+            df = _resolve_urls(df)
         st.session_state.df        = df
         st.session_state.is_sample = False
     st.session_state.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

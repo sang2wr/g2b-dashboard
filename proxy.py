@@ -1,4 +1,4 @@
-"""나라장터 공고 URL 프록시 (localhost:8502)"""
+"""나라장터 공고 URL 해석기 (서버 사이드 SSO base_uri 추출)"""
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 import requests
@@ -11,6 +11,27 @@ UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/125.0.0.0 Safari/537.36"
 )
+
+
+def resolve_notice_url(bid_no: str, bid_ord: str = "000") -> str:
+    """SSO 첫 302 리다이렉트에서 base_uri(bodyDataKey 포함)를 추출해 반환.
+    서버 사이드에서 호출 — 나라장터 쿠키가 없으므로 base_uri 경로로 분기됨."""
+    src = (
+        f"https://www.g2b.go.kr/link/PNPE027_01/single/"
+        f"?bidPbancNo={bid_no}&bidPbancOrd={bid_ord}"
+    )
+    try:
+        s = requests.Session()
+        s.headers["User-Agent"] = UA
+        r0 = s.get(src, timeout=10, allow_redirects=False)
+        if r0.status_code == 302:
+            sso_params = parse_qs(urlparse(r0.headers.get("Location", "")).query)
+            base_uri_enc = sso_params.get("base_uri", [""])[0]
+            if base_uri_enc:
+                return unquote(base_uri_enc)
+    except Exception:
+        pass
+    return src  # 폴백: 직접 SSO 링크
 
 
 class Handler(BaseHTTPRequestHandler):

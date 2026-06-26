@@ -254,3 +254,11 @@ python -m streamlit run app.py --server.port 8501
 ```
 
 *기록 추가일: 2026-06-26 (세션 2)*
+
+---
+
+## 배포 정보
+
+- **플랫폼**: Streamlit Community Cloud
+- **배포 URL**: https://g2b-dashboard-gnh9bmrne9le7miyleowff.streamlit.app/
+- **배포 완료일**: 2026-06-26
