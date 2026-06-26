@@ -4,9 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 
-from concurrent.futures import ThreadPoolExecutor
 from api_client import fetch_notices, sample_data
-import proxy as _proxy
 
 # API 키 로드 (Streamlit Secrets → .env 순서로 시도)
 def _load_env_key() -> str:
@@ -66,28 +64,38 @@ def _amt_str(amt) -> str:
         return "-"
 
 
+G2B_LINK_BASE = "https://www.g2b.go.kr/link/PNPE027_01/single/"
+
+
 def show_table(data: pd.DataFrame, show_all: bool = True):
     df = data.copy()
-    df["공고링크"] = df["_resolved_url"] if "_resolved_url" in df.columns else ""
+
+    def _g2b_url(row):
+        bid_no  = str(row.get("공고번호", "") or "")
+        bid_ord = str(row.get("bidNtceOrd", "000") or "000")
+        return f"{G2B_LINK_BASE}?bidPbancNo={bid_no}&bidPbancOrd={bid_ord}" if bid_no else ""
+
+    df["공고링크"] = df.apply(_g2b_url, axis=1)
     df["추정가격_표시"] = df["추정가격"].apply(_amt_str)
     df["마감일"] = df["입찰마감"].astype(str).str[:10]
     df["공고일"] = df["공고일시"].astype(str).str[:10]
 
-    base_cols  = ["공고일", "공고명", "공고기관", "추정가격_표시", "마감일", "마감D-Day", "공고링크"]
+    base_cols  = ["공고일", "공고번호", "공고명", "공고기관", "추정가격_표시", "마감일", "마감D-Day", "공고링크"]
     extra_cols = ["수요기관", "담당자", "담당자연락처"] if show_all else []
     show_cols  = base_cols + extra_cols
 
     col_cfg = {
-        "공고일":       st.column_config.TextColumn("공고일",    width=95),
+        "공고일":       st.column_config.TextColumn("공고일",    width=90),
+        "공고번호":     st.column_config.TextColumn("공고번호",  width=140),
         "공고명":       st.column_config.TextColumn("공고명",    width="large"),
-        "공고기관":     st.column_config.TextColumn("공고기관",  width=160),
+        "공고기관":     st.column_config.TextColumn("공고기관",  width=150),
         "추정가격_표시":st.column_config.TextColumn("추정가격",  width=90),
-        "마감일":       st.column_config.TextColumn("마감일",    width=95),
-        "마감D-Day":    st.column_config.NumberColumn("D-Day",   width=65, format="%d일"),
+        "마감일":       st.column_config.TextColumn("마감일",    width=90),
+        "마감D-Day":    st.column_config.NumberColumn("D-Day",   width=60, format="%d일"),
         "공고링크":     st.column_config.LinkColumn(
-                            "공고 바로가기",
-                            display_text="→ 공고보기",
-                            width=100,
+                            "바로가기",
+                            display_text="→ 공고",
+                            width=80,
                         ),
         "수요기관":     st.column_config.TextColumn("수요기관"),
         "담당자":       st.column_config.TextColumn("담당자",    width=80),
@@ -190,25 +198,6 @@ with st.sidebar:
 # ── 메인 ─────────────────────────────────────────────────────────
 st.title("📋 나라장터 입찰공고 대시보드")
 
-def _resolve_urls(df: pd.DataFrame) -> pd.DataFrame:
-    """공고번호 기준으로 실제 공고 URL을 서버 사이드에서 병렬 해석."""
-    if df.empty:
-        return df
-    rows = df[["공고번호"] + (["bidNtceOrd"] if "bidNtceOrd" in df.columns else [])].to_dict("records")
-
-    def resolve(r):
-        bid_no  = str(r.get("공고번호", "") or "")
-        bid_ord = str(r.get("bidNtceOrd", "000") or "000")
-        return _proxy.resolve_notice_url(bid_no, bid_ord) if bid_no else ""
-
-    with ThreadPoolExecutor(max_workers=20) as ex:
-        urls = list(ex.map(resolve, rows))
-
-    df = df.copy()
-    df["_resolved_url"] = urls
-    return df
-
-
 # 초기 샘플 로드
 if "df" not in st.session_state:
     st.session_state.df       = sample_data()
@@ -236,8 +225,6 @@ if search_btn:
                 days=days,
                 exclude_words=exclude_words,
             )
-        with st.spinner("공고 링크 준비 중..."):
-            df = _resolve_urls(df)
         st.session_state.df        = df
         st.session_state.is_sample = False
     st.session_state.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -254,6 +241,8 @@ with time_col:
 
 if is_sample:
     st.info("📌 **샘플 데이터** 표시 중 — 왼쪽에 API 키 입력 후 '공고 조회'를 누르면 실시간 데이터를 불러옵니다.")
+
+st.caption("💡 **공고 링크**: 나라장터 **로그아웃** 상태에서 클릭하면 공고 페이지로 바로 이동합니다. 로그인 상태라면 공고번호를 복사해 나라장터에서 직접 검색하세요.")
 
 # ── 요약 카드 ────────────────────────────────────────────────────
 if not df.empty:
