@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+check_url*.py
+debug_link.py
+test_link.html
