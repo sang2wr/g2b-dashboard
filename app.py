@@ -27,20 +27,57 @@ st.set_page_config(
     page_title="나라장터 공고 대시보드",
     page_icon="📋",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown("""
 <style>
+/* ── 메트릭 카드 ── */
 .metric-card {
   background:#f0f4ff; border-left:4px solid #1a56db;
-  border-radius:8px; padding:14px 18px; margin-bottom:8px;
+  border-radius:8px; padding:14px 18px; margin-bottom:0;
 }
 .metric-title { font-size:13px; color:#6b7280; margin:0; }
 .metric-value { font-size:28px; font-weight:700; color:#1a56db; margin:4px 0 0; }
-.deadline-soon  { background:#fff3cd !important; border-left-color:#f59e0b !important; }
+.deadline-soon     { background:#fff3cd !important; border-left-color:#f59e0b !important; }
 .deadline-critical { background:#fee2e2 !important; border-left-color:#ef4444 !important; }
-.amount-card { border-left-color:#065f46 !important; }
+.amount-card       { border-left-color:#065f46 !important; }
+
+/* ── 반응형 메트릭 그리드 ── */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* ── 모바일 공통 ── */
+@media (max-width: 768px) {
+  .metric-title { font-size: 12px; }
+  .metric-value { font-size: 22px; }
+
+  /* 탭 레이블 작게 */
+  .stTabs [data-baseweb="tab"] {
+    font-size: 13px !important;
+    padding: 8px 8px !important;
+  }
+
+  /* 버튼 터치 타겟 크게 */
+  .stButton > button {
+    min-height: 48px !important;
+    font-size: 16px !important;
+  }
+
+  /* 텍스트 입력 터치 타겟 */
+  .stTextInput > div > div > input,
+  .stTextArea textarea,
+  .stSelectbox > div > div {
+    font-size: 16px !important; /* iOS 자동 줌 방지 */
+  }
+
+  /* 테이블 가로 스크롤 */
+  .stDataFrame { overflow-x: auto; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -81,22 +118,21 @@ def show_table(data: pd.DataFrame, show_all: bool = True):
     df["공고일"] = df["공고일시"].astype(str).str[:10]
 
     # ── 결과 내 검색 & 정렬 ──────────────────────────────────────
-    fc1, fc2, fc3 = st.columns([3, 2, 1])
+    q = st.text_input(
+        "결과 내 검색",
+        placeholder="공고명 · 기관명으로 필터...",
+        key=f"q_{'all' if show_all else 'urg'}",
+        label_visibility="collapsed",
+    )
+    fc1, fc2 = st.columns([3, 1])
     with fc1:
-        q = st.text_input(
-            "결과 내 검색",
-            placeholder="공고명 · 기관명으로 필터...",
-            key=f"q_{'all' if show_all else 'urg'}",
-            label_visibility="collapsed",
-        )
-    with fc2:
         sort_opt = st.selectbox(
             "정렬",
             ["마감일 빠른순", "마감일 느린순", "추정가격 높은순", "추정가격 낮은순", "공고일 최신순"],
             key=f"sort_{'all' if show_all else 'urg'}",
             label_visibility="collapsed",
         )
-    with fc3:
+    with fc2:
         st.caption(f"**{len(df):,}건**")
 
     if q:
@@ -204,24 +240,22 @@ with st.sidebar:
     )
     keywords = [k.strip() for k in kw_input.split(",") if k.strip()]
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.caption("💰 최소 추정가격")
-        min_amount_man = st.number_input(
-            "만원",
-            value=1000, min_value=0, step=500,
-            label_visibility="collapsed",
-        )
-        min_amount = min_amount_man * 10_000
-        st.caption(f"{min_amount_man:,}만원 이상")
-    with col_b:
-        st.caption("📅 게시 기간")
-        days = st.number_input(
-            "일",
-            value=7, min_value=1, max_value=60, step=1,
-            label_visibility="collapsed",
-        )
-        st.caption(f"최근 {days}일")
+    st.caption("💰 최소 추정가격")
+    min_amount_man = st.number_input(
+        "만원",
+        value=1000, min_value=0, step=500,
+        label_visibility="collapsed",
+    )
+    min_amount = min_amount_man * 10_000
+    st.caption(f"{min_amount_man:,}만원 이상")
+
+    st.caption("📅 게시 기간")
+    days = st.number_input(
+        "일",
+        value=7, min_value=1, max_value=60, step=1,
+        label_visibility="collapsed",
+    )
+    st.caption(f"최근 {days}일")
 
     st.caption("🚫 제외 키워드")
     excl_input = st.text_input(
@@ -315,11 +349,26 @@ if not df.empty:
     d7           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)).sum())
     total_amount = df["추정가격"].sum()
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.markdown(f'<div class="metric-card"><p class="metric-title">전체 공고 수</p><p class="metric-value">{total}건</p></div>', unsafe_allow_html=True)
-    c2.markdown(f'<div class="metric-card deadline-critical"><p class="metric-title">마감 3일 이내 🚨</p><p class="metric-value">{d3}건</p></div>', unsafe_allow_html=True)
-    c3.markdown(f'<div class="metric-card deadline-soon"><p class="metric-title">마감 7일 이내 ⚠️</p><p class="metric-value">{d7}건</p></div>', unsafe_allow_html=True)
-    c4.markdown(f'<div class="metric-card amount-card"><p class="metric-title">총 추정가격</p><p class="metric-value">{total_amount/100_000_000:.1f}억</p></div>', unsafe_allow_html=True)
+    st.markdown(f"""
+<div class="metrics-grid">
+  <div class="metric-card">
+    <p class="metric-title">전체 공고 수</p>
+    <p class="metric-value">{total}건</p>
+  </div>
+  <div class="metric-card deadline-critical">
+    <p class="metric-title">마감 3일 이내 🚨</p>
+    <p class="metric-value">{d3}건</p>
+  </div>
+  <div class="metric-card deadline-soon">
+    <p class="metric-title">마감 7일 이내 ⚠️</p>
+    <p class="metric-value">{d7}건</p>
+  </div>
+  <div class="metric-card amount-card" style="color:#065f46;">
+    <p class="metric-title">총 추정가격</p>
+    <p class="metric-value" style="color:#065f46;">{total_amount/100_000_000:.1f}억</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     st.divider()
 
