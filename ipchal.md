@@ -262,3 +262,151 @@ python -m streamlit run app.py --server.port 8501
 - **플랫폼**: Streamlit Community Cloud
 - **배포 URL**: https://g2b-dashboard-gnh9bmrne9le7miyleowff.streamlit.app/
 - **배포 완료일**: 2026-06-26
+
+---
+
+## 2026-06-26 세션 3 — 클라우드 배포 후 공고 링크 문제 해결
+
+### 문제: 배포 환경에서 공고 링크 클릭 시 에러
+
+**증상**: `→ 공고보기` 클릭 시 `{"ErrorMsg":"에러가 발생하였습니다.","ErrorCode":-1}` 반환
+
+**원인 분석**:
+- 클라우드 배포 시 `proxy.py`는 Streamlit Cloud 서버의 `localhost:8502`에서 실행
+- 링크 URL이 `http://localhost:8502/?no=...` 형태 → 사용자 **브라우저**가 자기 PC의 localhost에 접속 시도 → 연결 거부
+
+**1차 시도 — 서버 사이드 URL 사전 해석 (실패)**:
+```python
+# proxy.py에 resolve_notice_url() 함수 추가
+# ThreadPoolExecutor로 병렬 해석 후 _resolved_url 컬럼에 저장
+```
+- 결과: 여전히 에러 (`bodyDataKey` 두 개 + `key` 포함된 URL)
+- **근본 원인**: `bodyDataKey`도 서버 세션에 종속된 값 → 브라우저 세션에서 사용 불가
+  - SSO 리다이렉트 체인: `/link/` → SSO(`base_uri` 추출) → `/link/?bodyDataKey=A` → SSO 재처리(`bodyDataKey=B`, `key=...`) → 에러
+  - `base_uri` 자체도 `/link/` URL이라 브라우저가 방문 시 SSO를 한 번 더 거치면서 두 번째 `bodyDataKey` + `key` 추가됨
+
+**최종 해결 — 직접 SSO 링크 사용**:
+```python
+G2B_LINK_BASE = "https://www.g2b.go.kr/link/PNPE027_01/single/"
+
+def _g2b_url(row):
+    bid_no  = str(row.get("공고번호", "") or "")
+    bid_ord = str(row.get("bidNtceOrd", "000") or "000")
+    return f"{G2B_LINK_BASE}?bidPbancNo={bid_no}&bidPbancOrd={bid_ord}" if bid_no else ""
+```
+
+**환경별 동작**:
+| 상태 | 결과 |
+|------|------|
+| 나라장터 **로그아웃** | 공고 페이지 바로 이동 ✓ |
+| 나라장터 **로그인** | 나라장터 홈으로 이동 (공고번호 복사 후 검색 필요) |
+
+- 테이블에 **공고번호 컬럼** 추가하여 로그인 상태 대응
+- `proxy.py`는 로컬 실행용으로 유지 (클라우드에서는 미사용)
+
+---
+
+## 2026-06-26 세션 4 — 검색 편의성 및 테이블 스크롤 개선
+
+### 변경 내용
+
+**테이블 높이 동적 조정**:
+```python
+row_h = 35
+tbl_h = min(max(400, 38 + len(df) * row_h), 1400)
+st.dataframe(..., height=tbl_h)
+```
+- 이전: 고정 580px → 이후: 행 수 기반 동적 (최소 400 ~ 최대 1400px)
+
+**결과 내 빠른 검색 추가**:
+```python
+q = st.text_input("결과 내 검색", placeholder="공고명 · 기관명으로 필터...")
+if q:
+    mask = df["공고명"].str.contains(q, ...) | df["공고기관"].str.contains(q, ...)
+    df = df[mask]
+```
+
+**정렬 옵션 추가**:
+- 마감일 빠른순 / 느린순
+- 추정가격 높은순 / 낮은순
+- 공고일 최신순
+
+**사이드바 개편**:
+- 조회 조건(키워드, 금액, 기간, 제외어)을 상단으로 이동
+- API 키 설정을 `st.expander`로 접기 처리
+- 기간 설정: 슬라이더(max 30일) → 숫자 입력(max 60일)
+
+*기록 추가일: 2026-06-26 (세션 3·4)*
+
+---
+
+## 2026-06-26 세션 5 — 모바일 최적화 및 UX 개선
+
+### 변경 1: 모바일 최적화
+
+**`initial_sidebar_state`**: `expanded` → `collapsed` (모바일에서 사이드바가 화면 절반 차지하는 문제 해결)
+
+**메트릭 카드 반응형 그리드**:
+- 기존: `st.columns(4)` — 모바일에서 초소형 4칸
+- 변경: CSS grid `repeat(auto-fit, minmax(140px, 1fr))` — 화면 너비에 따라 자동 2×2 또는 4×1
+
+**모바일 CSS 추가**:
+```css
+@media (max-width: 768px) {
+  .stButton > button { min-height: 48px !important; font-size: 16px !important; }
+  .stTextInput > div > div > input, .stTextArea textarea {
+    font-size: 16px !important; /* iOS 자동 줌 방지 */
+  }
+}
+```
+
+**검색/정렬 컨트롤**: 3열(검색·정렬·건수) → 검색 1행 + 정렬/건수 2열
+
+**사이드바 입력 필드**: 금액·기간 2열 나란히 → 단일 열 (터치 편의)
+
+---
+
+### 변경 2: 조회조건 UX 개선
+
+**구조 재설계**:
+- 기존: 조회조건이 사이드바에 숨겨져 있음 (모바일에서 찾기 어려움)
+- 변경: 메인 화면 상단에 `st.form("search_form")`으로 항상 표시
+
+**사이드바 제거**: 모든 조회조건·API키 설정을 메인 폼으로 이동
+
+**기본값 모두 제거**:
+| 항목 | 이전 기본값 | 변경 후 |
+|------|------------|---------|
+| 키워드 | `스마트, 경로당, AI, 교육, 박람회` | 빈 값 |
+| 최소 추정가격 | `1,000만원` | `0` (전체) |
+| 제외 키워드 | `시담` | 빈 값 |
+
+**샘플 데이터 제거**:
+- 기존: 앱 진입 시 샘플 데이터 8건 자동 표시
+- 변경: "조회 조건을 입력하고 공고 조회 버튼을 눌러주세요" 안내 표시
+- `sample_data()` import 제거
+
+**API 키 없을 때**: 샘플 데이터 대체 → 에러 메시지 표시 후 `st.stop()`
+
+---
+
+### 변경 3: 마감일 지난 공고 자동 제외
+
+```python
+# D-Day 계산 후 음수(마감 지난 것) 필터
+df = df[df["마감D-Day"].isna() | (df["마감D-Day"] >= 0)]
+```
+- 마감일 정보가 있고 D-Day < 0인 공고는 결과에서 자동 제외
+- 마감일 정보 없는 공고(isna)는 그대로 표시
+
+---
+
+### 커밋 이력
+
+| 커밋 | 내용 |
+|------|------|
+| `6c8f9ff` | 모바일 최적화: 반응형 메트릭 그리드, 사이드바 기본 닫힘, 터치 타겟 개선 |
+| `8a49581` | UX 개선: 조회조건 메인화면 이동, 기본값 제거, 샘플 데이터 제거 |
+| `4213df6` | 마감일 지난 공고 자동 제외 (D-Day 음수 필터) |
+
+*기록 추가일: 2026-06-26 (세션 5)*
