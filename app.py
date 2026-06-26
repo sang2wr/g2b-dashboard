@@ -298,6 +298,9 @@ df["마감D-Day"] = df["입찰마감"].apply(
     if pd.notnull(pd.to_datetime(x, errors="coerce")) else None
 )
 
+# 마감일 지난 공고 제외
+df = df[df["마감D-Day"].isna() | (df["마감D-Day"] >= 0)]
+
 total        = len(df)
 d3           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 3) & (df["마감D-Day"] >= 0)).sum())
 d7           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)).sum())
