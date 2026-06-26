@@ -80,6 +80,44 @@ def show_table(data: pd.DataFrame, show_all: bool = True):
     df["마감일"] = df["입찰마감"].astype(str).str[:10]
     df["공고일"] = df["공고일시"].astype(str).str[:10]
 
+    # ── 결과 내 검색 & 정렬 ──────────────────────────────────────
+    fc1, fc2, fc3 = st.columns([3, 2, 1])
+    with fc1:
+        q = st.text_input(
+            "결과 내 검색",
+            placeholder="공고명 · 기관명으로 필터...",
+            key=f"q_{'all' if show_all else 'urg'}",
+            label_visibility="collapsed",
+        )
+    with fc2:
+        sort_opt = st.selectbox(
+            "정렬",
+            ["마감일 빠른순", "마감일 느린순", "추정가격 높은순", "추정가격 낮은순", "공고일 최신순"],
+            key=f"sort_{'all' if show_all else 'urg'}",
+            label_visibility="collapsed",
+        )
+    with fc3:
+        st.caption(f"**{len(df):,}건**")
+
+    if q:
+        mask = (
+            df["공고명"].str.contains(q, case=False, na=False) |
+            df["공고기관"].str.contains(q, case=False, na=False)
+        )
+        df = df[mask]
+        st.caption(f"'{q}' 필터 결과: {len(df):,}건")
+
+    sort_map = {
+        "마감일 빠른순":   ("마감D-Day", True),
+        "마감일 느린순":   ("마감D-Day", False),
+        "추정가격 높은순": ("추정가격",  False),
+        "추정가격 낮은순": ("추정가격",  True),
+        "공고일 최신순":   ("공고일시",  False),
+    }
+    sort_col, sort_asc = sort_map[sort_opt]
+    if sort_col in df.columns:
+        df = df.sort_values(sort_col, ascending=sort_asc, na_position="last")
+
     base_cols  = ["공고일", "공고번호", "공고명", "공고기관", "추정가격_표시", "마감일", "마감D-Day", "공고링크"]
     extra_cols = ["수요기관", "담당자", "담당자연락처"] if show_all else []
     show_cols  = base_cols + extra_cols
@@ -102,14 +140,17 @@ def show_table(data: pd.DataFrame, show_all: bool = True):
         "담당자연락처": st.column_config.TextColumn("연락처",    width=120),
     }
 
+    # 행 수에 따라 높이 동적 조정 (최소 400, 최대 1400)
+    row_h = 35
+    tbl_h = min(max(400, 38 + len(df) * row_h), 1400)
+
     st.dataframe(
         df[show_cols],
         column_config=col_cfg,
         hide_index=True,
         use_container_width=True,
-        height=580,
+        height=tbl_h,
     )
-    st.caption(f"총 {len(data):,}건")
 
     csv = data.to_csv(index=False, encoding="utf-8-sig")
     st.download_button(
@@ -150,49 +191,64 @@ def show_stats(data: pd.DataFrame):
 
 # ── 사이드바 ─────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("🔍 검색 조건")
+    st.title("🔍 조회 조건")
 
-    api_key = st.text_input(
-        "공공데이터포털 API 키",
-        value=DEFAULT_API_KEY,
-        type="password",
-        placeholder="발급받은 API 키 입력",
-        help="data.go.kr → 조달청_나라장터 입찰공고정보서비스 활용신청 후 발급",
-    )
-
-    st.divider()
     st.subheader("📌 키워드 (OR 검색)")
     kw_input = st.text_area(
         "키워드 (쉼표 구분)",
         value="스마트, 경로당, AI, 교육, 박람회",
-        height=90,
-        help="공고명에 하나라도 포함되면 포함",
+        height=100,
+        help="공고명에 하나라도 포함되면 결과에 포함",
+        label_visibility="collapsed",
+        placeholder="스마트, 경로당, AI, 교육...",
     )
     keywords = [k.strip() for k in kw_input.split(",") if k.strip()]
 
-    st.subheader("💰 최소 추정가격")
-    min_amount_man = st.number_input("만원 이상", value=1000, min_value=0, step=100)
-    min_amount = min_amount_man * 10_000
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.caption("💰 최소 추정가격")
+        min_amount_man = st.number_input(
+            "만원",
+            value=1000, min_value=0, step=500,
+            label_visibility="collapsed",
+        )
+        min_amount = min_amount_man * 10_000
+        st.caption(f"{min_amount_man:,}만원 이상")
+    with col_b:
+        st.caption("📅 게시 기간")
+        days = st.number_input(
+            "일",
+            value=7, min_value=1, max_value=60, step=1,
+            label_visibility="collapsed",
+        )
+        st.caption(f"최근 {days}일")
 
-    st.subheader("📅 게시 기간")
-    days = st.slider("최근 N일", min_value=1, max_value=30, value=7)
-
-    st.subheader("🚫 제외 키워드")
-    excl_input = st.text_input("제외 단어 (쉼표 구분)", value="시담")
+    st.caption("🚫 제외 키워드")
+    excl_input = st.text_input(
+        "제외",
+        value="시담",
+        placeholder="시담, 재공고...",
+        label_visibility="collapsed",
+    )
     exclude_words = [e.strip() for e in excl_input.split(",") if e.strip()]
 
     st.divider()
     search_btn = st.button("🔄 공고 조회", use_container_width=True, type="primary")
 
-    with st.expander("📖 API 키 발급 방법"):
+    with st.expander("🔑 API 키 설정"):
+        api_key = st.text_input(
+            "공공데이터포털 API 키",
+            value=DEFAULT_API_KEY,
+            type="password",
+            placeholder="발급받은 API 키 입력",
+            help="data.go.kr → 조달청_나라장터 입찰공고정보서비스 활용신청 후 발급",
+        )
         st.markdown("""
-1. **[data.go.kr](https://www.data.go.kr)** 로그인
-2. 검색창에 **`나라장터 입찰공고`** 검색
-3. **나라장터 입찰공고정보 서비스** 클릭
-4. **활용신청** → 즉시 발급 (자동승인)
-5. **마이페이지 → 인증키 관리**에서
-   `Decoding 키` 복사
-6. 위 입력창에 붙여넣기 후 조회
+**발급 방법**
+1. [data.go.kr](https://www.data.go.kr) 로그인
+2. `나라장터 입찰공고` 검색
+3. **나라장터 입찰공고정보 서비스** → 활용신청
+4. 마이페이지 → 인증키 관리 → `Decoding 키` 복사
         """)
 
 # ── 메인 ─────────────────────────────────────────────────────────
