@@ -25,18 +25,18 @@ FIELD_MAP = {
     "ntceKindNm":          "공고종류",
 }
 
-# 사전규격 응답 필드 → 한글 컬럼명 매핑
+# 사전규격 응답 필드 → 한글 컬럼명 매핑 (실제 API 응답 기준)
 PRESPEC_FIELD_MAP = {
-    "bfSpecRgstNo":       "등록번호",
-    "prdctClsfcNoNm":     "사전규격명",
-    "orderInsttNm":       "공고기관",
-    "dminsttNm":          "수요기관",
-    "asignBdgtAmt":       "추정가격",
-    "presmptPrce":        "추정가격2",   # 있는 경우 병합용
-    "bfSpecRgstDt":       "공고일시",
-    "opninRgstClseDt":    "의견접수마감",
-    "ntceInsttOfclNm":    "담당자",
-    "ntceInsttOfclTelNo": "담당자연락처",
+    "bfSpecRgstNo":    "등록번호",
+    "prdctClsfcNoNm":  "사전규격명",
+    "orderInsttNm":    "공고기관",
+    "rlDminsttNm":     "수요기관",
+    "asignBdgtAmt":    "추정가격",
+    "rcptDt":          "공고일시",
+    "opninRgstClseDt": "의견접수마감",
+    "ofclNm":          "담당자",
+    "ofclTelNo":       "담당자연락처",
+    "bsnsDivNm":       "업무구분",
 }
 
 
@@ -125,8 +125,8 @@ def fetch_prespec(
     exclude_words: list[str] | None = None,
 ) -> pd.DataFrame:
     """
-    나라장터 사전규격을 키워드별로 조회 후 필터링한 DataFrame 반환.
-    keywords : OR 검색 — 각 키워드마다 API 호출 후 합산
+    나라장터 사전규격 조회.
+    API가 키워드 파라미터를 지원하지 않으므로 날짜 범위로 전체 조회 후 클라이언트 필터링.
     """
     end_dt   = datetime.now()
     start_dt = end_dt - timedelta(days=days)
@@ -134,37 +134,34 @@ def fetch_prespec(
     endDt    = end_dt.strftime("%Y%m%d%H%M")
 
     all_rows: list[dict] = []
-
-    for kw in keywords:
-        page = 1
-        while True:
-            params = {
-                "ServiceKey":  api_key,
-                "type":        "json",
-                "numOfRows":   "100",
-                "pageNo":      str(page),
-                "inqryDiv":    "1",
-                "inqryBgnDt":  bgnDt,
-                "inqryEndDt":  endDt,
-                "prdctNm":     kw,
-            }
-            try:
-                resp = requests.get(PRESPEC_URL, params=params, timeout=15)
-                resp.raise_for_status()
-                body = resp.json().get("response", {}).get("body", {})
-                items = body.get("items") or []
-                if isinstance(items, dict):
-                    items = [items]
-                if not items:
-                    break
-                all_rows.extend(items)
-                total = int(body.get("totalCount", 0))
-                if page * 100 >= total:
-                    break
-                page += 1
-            except Exception as e:
-                print(f"[사전규격 API 오류] 키워드={kw} 페이지={page}: {e}")
+    page = 1
+    while True:
+        params = {
+            "ServiceKey":  api_key,
+            "type":        "json",
+            "numOfRows":   "100",
+            "pageNo":      str(page),
+            "inqryDiv":    "1",
+            "inqryBgnDt":  bgnDt,
+            "inqryEndDt":  endDt,
+        }
+        try:
+            resp = requests.get(PRESPEC_URL, params=params, timeout=15)
+            resp.raise_for_status()
+            body = resp.json().get("response", {}).get("body", {})
+            items = body.get("items") or []
+            if isinstance(items, dict):
+                items = [items]
+            if not items:
                 break
+            all_rows.extend(items)
+            total = int(body.get("totalCount", 0))
+            if page * 100 >= total:
+                break
+            page += 1
+        except Exception as e:
+            print(f"[사전규격 API 오류] 페이지={page}: {e}")
+            break
 
     if not all_rows:
         return pd.DataFrame()
@@ -172,17 +169,13 @@ def fetch_prespec(
     df = pd.DataFrame(all_rows)
     df = df.rename(columns={k: v for k, v in PRESPEC_FIELD_MAP.items() if k in df.columns})
 
-    # presmptPrce가 있으면 asignBdgtAmt 대신 사용
-    if "추정가격2" in df.columns:
-        mask = df["추정가격2"].notna() & (df["추정가격2"] != "")
-        if "추정가격" not in df.columns:
-            df["추정가격"] = df["추정가격2"]
-        else:
-            df.loc[mask, "추정가격"] = df.loc[mask, "추정가격2"]
-        df = df.drop(columns=["추정가격2"])
-
     if "등록번호" in df.columns:
         df = df.drop_duplicates(subset=["등록번호"])
+
+    # 키워드 OR 필터 (클라이언트 사이드)
+    if keywords and "사전규격명" in df.columns:
+        pattern = "|".join(keywords)
+        df = df[df["사전규격명"].str.contains(pattern, case=False, na=False)]
 
     if "추정가격" in df.columns:
         df["추정가격"] = pd.to_numeric(df["추정가격"], errors="coerce").fillna(0).astype(int)
@@ -191,7 +184,7 @@ def fetch_prespec(
 
     if exclude_words and "사전규격명" in df.columns:
         pattern = "|".join(exclude_words)
-        df = df[~df["사전규격명"].str.contains(pattern, na=False)]
+        df = df[~df["사전규격명"].str.contains(pattern, case=False, na=False)]
 
     if "공고일시" in df.columns:
         df["공고일시"] = pd.to_datetime(df["공고일시"], errors="coerce")

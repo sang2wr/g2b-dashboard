@@ -199,11 +199,8 @@ def show_prespec_table(data: pd.DataFrame, tab_key: str = "all"):
     df = data.copy()
 
     def _ps_url(row):
-        url = str(row.get("사전규격URL", "") or "")
-        if url.startswith("http"):
-            return url
         reg_no = str(row.get("등록번호", "") or "")
-        return f"{PRESPEC_LINK_BASE}?bfSpecRgstnNo={reg_no}" if reg_no else ""
+        return f"{PRESPEC_LINK_BASE}?bfSpecRgstNo={reg_no}" if reg_no else ""
 
     df["사전규격링크"] = df.apply(_ps_url, axis=1)
     df["추정가격_표시"] = df["추정가격"].apply(_amt_str)
