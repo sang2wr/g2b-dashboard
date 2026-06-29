@@ -508,9 +508,6 @@ with top_tab2:
             if pd.notnull(pd.to_datetime(x, errors="coerce")) else None
         ) if "의견접수마감" in df_ps.columns else None
 
-        if "마감D-Day" in df_ps.columns:
-            df_ps = df_ps[df_ps["마감D-Day"].isna() | (df_ps["마감D-Day"] >= 0)]
-
         ps_total  = len(df_ps)
         ps_d3     = int((df_ps["마감D-Day"].notna() & (df_ps["마감D-Day"] <= 3) & (df_ps["마감D-Day"] >= 0)).sum()) if "마감D-Day" in df_ps.columns else 0
         ps_d7     = int((df_ps["마감D-Day"].notna() & (df_ps["마감D-Day"] <= 7) & (df_ps["마감D-Day"] >= 0)).sum()) if "마감D-Day" in df_ps.columns else 0
