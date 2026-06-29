@@ -410,3 +410,82 @@ df = df[df["마감D-Day"].isna() | (df["마감D-Day"] >= 0)]
 | `4213df6` | 마감일 지난 공고 자동 제외 (D-Day 음수 필터) |
 
 *기록 추가일: 2026-06-26 (세션 5)*
+
+---
+
+## 2026-06-29 세션 6 — search.xlsx 우선순위 키워드 멀티셀렉트 추가
+
+### 변경 목적
+
+기존에는 키워드를 쉼표로 직접 타이핑해야 했음.
+`search.xlsx` 파일에 1~3순위로 분류된 키워드를 멀티셀렉트 위젯으로 손쉽게 선택할 수 있도록 개선.
+
+### search.xlsx 구조
+
+| 1순위 (31개) | 2순위 (16개) | 3순위 (11개) |
+|-------------|-------------|-------------|
+| AI, 튜터, 경로당, 늘봄, 디지털, 청년, 포용, 리터러시, 시니어, 장년, 중년, 일자리, 경력, 단절, 은퇴, 퇴직, 퇴사, 재기, 도전, 전직, 취업, 노하우, 상생, 매칭, 프로보노, 재능, 어르신, 새싹, 노인, 고령 | 혁신, 사회적, 공간, 희망, 힐링, 체인지, 임팩트, 캠프, 격차, 부트, 제작, 기부, 스페이스, 메이커, 소셜벤처, 취약 | 시티즌, 엘더리, 40대, 50대, 60대, 40플러스, 50플러스, 60플러스, 연장자, 실버, 에이징 |
+
+### 주요 변경 내용
+
+**`requirements.txt`**:
+```
+openpyxl>=3.1.0  # 추가
+```
+
+**`app.py` — `load_keyword_presets()` 함수 추가**:
+```python
+@st.cache_data
+def load_keyword_presets():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search.xlsx")
+    try:
+        df = pd.read_excel(path)
+        p1 = df.iloc[:, 0].dropna().astype(str).str.strip().tolist()
+        p2 = df.iloc[:, 1].dropna().astype(str).str.strip().tolist()
+        p3 = df.iloc[:, 2].dropna().astype(str).str.strip().tolist()
+        return p1, p2, p3
+    except Exception:
+        return [], [], []
+```
+
+**`app.py` — 조회 폼 키워드 입력 교체**:
+```python
+# 수정 전: 텍스트 직접 입력
+kw_input = st.text_area("키워드 (쉼표로 구분, OR 검색)", ...)
+
+# 수정 후: 우선순위별 multiselect + 추가 입력
+p1_kws, p2_kws, p3_kws = load_keyword_presets()
+col_p1, col_p2, col_p3 = st.columns(3)
+with col_p1:
+    sel1 = st.multiselect("🥇 1순위", options=p1_kws, default=[])
+with col_p2:
+    sel2 = st.multiselect("🥈 2순위", options=p2_kws, default=[])
+with col_p3:
+    sel3 = st.multiselect("🥉 3순위", options=p3_kws, default=[])
+kw_input = st.text_input("추가 키워드 (쉼표로 구분, OR 검색)", ...)
+```
+
+**`app.py` — 키워드 합산 (중복 제거)**:
+```python
+preset_kws = sel1 + sel2 + sel3
+custom_kws = [k.strip() for k in kw_input.split(",") if k.strip()]
+# 순서 유지 중복 제거: 1순위 → 2순위 → 3순위 → 추가
+seen = set()
+keywords = []
+for kw in preset_kws + custom_kws:
+    if kw not in seen:
+        seen.add(kw)
+        keywords.append(kw)
+```
+
+### 커밋 및 배포
+
+| 커밋 | 내용 |
+|------|------|
+| `31a7c3f` | feat: search.xlsx 우선순위 키워드 멀티셀렉트 추가 |
+
+- `search.xlsx` 파일도 git에 포함하여 Streamlit Cloud에서 읽을 수 있도록 커밋
+- `@st.cache_data` 적용으로 앱 재시작 없이 Excel 변경 시 자동 반영
+- GitHub push → Streamlit Cloud 자동 배포 완료
+
+*기록 추가일: 2026-06-29 (세션 6)*
