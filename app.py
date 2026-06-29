@@ -108,8 +108,7 @@ def _amt_str(amt) -> str:
         return "-"
 
 
-# 사전규격 공개 목록 페이지 (등록번호 파라미터로 해당 항목 조회)
-PRESPEC_LINK_BASE = "https://www.g2b.go.kr/pb/pn/pbsy/publicpbsy028m01.do"
+G2B_HOME = "https://www.g2b.go.kr"
 
 
 def show_table(data: pd.DataFrame, show_all: bool = True):
@@ -198,8 +197,11 @@ def show_prespec_table(data: pd.DataFrame, tab_key: str = "all"):
     df = data.copy()
 
     def _ps_url(row):
-        reg_no = str(row.get("등록번호", "") or "")
-        return f"{PRESPEC_LINK_BASE}?bfSpecRgstNo={reg_no}" if reg_no else ""
+        for i in range(1, 6):
+            url = str(row.get(f"specDocFileUrl{i}", "") or "")
+            if url.startswith("http"):
+                return url
+        return ""
 
     df["사전규격링크"] = df.apply(_ps_url, axis=1)
     df["추정가격_표시"] = df["추정가격"].apply(_amt_str)
@@ -254,7 +256,7 @@ def show_prespec_table(data: pd.DataFrame, tab_key: str = "all"):
         "추정가격_표시": st.column_config.TextColumn("추정가격",   width=90),
         "의견마감일":    st.column_config.TextColumn("의견마감",   width=90),
         "마감D-Day":     st.column_config.NumberColumn("D-Day",    width=60, format="%d일"),
-        "사전규격링크":  st.column_config.LinkColumn("바로가기",   display_text="→ 규격", width=80),
+        "사전규격링크":  st.column_config.LinkColumn("사양서",     display_text="→ 문서", width=80),
         "수요기관":      st.column_config.TextColumn("수요기관"),
         "담당자":        st.column_config.TextColumn("담당자",     width=80),
         "담당자연락처":  st.column_config.TextColumn("연락처",     width=120),
@@ -432,7 +434,7 @@ if "df" not in st.session_state:
 if "last_updated" in st.session_state:
     st.caption(f"조회 시각: {st.session_state.last_updated}")
 
-st.caption("💡 **링크**: 나라장터 **로그아웃** 상태에서 클릭하면 페이지로 바로 이동합니다. 로그인 상태라면 번호로 직접 검색하세요.")
+st.caption("💡 **입찰공고 → 공고** 링크는 나라장터 공고 페이지로 이동합니다. **사전규격 → 문서** 링크는 규격 사양서(파일)를 직접 다운로드합니다.")
 
 today = datetime.now()
 
