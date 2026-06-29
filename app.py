@@ -108,7 +108,8 @@ def _amt_str(amt) -> str:
         return "-"
 
 
-PRESPEC_LINK_BASE = "https://www.g2b.go.kr/link/PNSY028_01/single/"
+# 사전규격 공개 목록 페이지 (등록번호 파라미터로 해당 항목 조회)
+PRESPEC_LINK_BASE = "https://www.g2b.go.kr/pb/pn/pbsy/publicpbsy028m01.do"
 
 
 def show_table(data: pd.DataFrame, show_all: bool = True):
