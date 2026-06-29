@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 import os
 
-from api_client import fetch_notices
+from api_client import fetch_notices, fetch_prespec
 
 
 @st.cache_data
@@ -108,7 +108,8 @@ def _amt_str(amt) -> str:
         return "-"
 
 
-G2B_LINK_BASE = "https://www.g2b.go.kr/link/PNPE027_01/single/"
+G2B_LINK_BASE    = "https://www.g2b.go.kr/link/PNPE027_01/single/"
+PRESPEC_LINK_BASE = "https://www.g2b.go.kr/link/PNPE028_01/single/"
 
 
 def show_table(data: pd.DataFrame, show_all: bool = True):
@@ -191,6 +192,90 @@ def show_table(data: pd.DataFrame, show_all: bool = True):
         file_name=f"나라장터_공고_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         mime="text/csv",
         key=f"csv_{'all' if show_all else 'urg'}",
+    )
+
+
+def show_prespec_table(data: pd.DataFrame, tab_key: str = "all"):
+    df = data.copy()
+
+    def _ps_url(row):
+        url = str(row.get("사전규격URL", "") or "")
+        if url.startswith("http"):
+            return url
+        reg_no = str(row.get("등록번호", "") or "")
+        return f"{PRESPEC_LINK_BASE}?bfSpecRgstnNo={reg_no}" if reg_no else ""
+
+    df["사전규격링크"] = df.apply(_ps_url, axis=1)
+    df["추정가격_표시"] = df["추정가격"].apply(_amt_str)
+    df["의견마감일"] = df["의견접수마감"].astype(str).str[:10] if "의견접수마감" in df.columns else ""
+    df["공고일"] = df["공고일시"].astype(str).str[:10]
+
+    q = st.text_input(
+        "결과 내 검색",
+        placeholder="사전규격명 · 기관명으로 필터...",
+        key=f"ps_q_{tab_key}",
+        label_visibility="collapsed",
+    )
+    fc1, fc2 = st.columns([3, 1])
+    with fc1:
+        sort_opt = st.selectbox(
+            "정렬",
+            ["의견마감 빠른순", "의견마감 느린순", "추정가격 높은순", "추정가격 낮은순", "등록일 최신순"],
+            key=f"ps_sort_{tab_key}",
+            label_visibility="collapsed",
+        )
+    with fc2:
+        st.caption(f"**{len(df):,}건**")
+
+    if q:
+        mask = (
+            df["사전규격명"].str.contains(q, case=False, na=False) |
+            df["공고기관"].str.contains(q, case=False, na=False)
+        )
+        df = df[mask]
+        st.caption(f"'{q}' 필터 결과: {len(df):,}건")
+
+    sort_map = {
+        "의견마감 빠른순": ("마감D-Day", True),
+        "의견마감 느린순": ("마감D-Day", False),
+        "추정가격 높은순": ("추정가격",  False),
+        "추정가격 낮은순": ("추정가격",  True),
+        "등록일 최신순":   ("공고일시",  False),
+    }
+    sort_col, sort_asc = sort_map[sort_opt]
+    if sort_col in df.columns:
+        df = df.sort_values(sort_col, ascending=sort_asc, na_position="last")
+
+    base_cols  = ["공고일", "등록번호", "사전규격명", "공고기관", "추정가격_표시", "의견마감일", "마감D-Day", "사전규격링크"]
+    extra_cols = ["수요기관", "담당자", "담당자연락처"]
+    show_cols  = [c for c in base_cols + extra_cols if c in df.columns]
+
+    col_cfg = {
+        "공고일":        st.column_config.TextColumn("등록일",     width=90),
+        "등록번호":      st.column_config.TextColumn("등록번호",   width=160),
+        "사전규격명":    st.column_config.TextColumn("사전규격명", width="large"),
+        "공고기관":      st.column_config.TextColumn("공고기관",   width=150),
+        "추정가격_표시": st.column_config.TextColumn("추정가격",   width=90),
+        "의견마감일":    st.column_config.TextColumn("의견마감",   width=90),
+        "마감D-Day":     st.column_config.NumberColumn("D-Day",    width=60, format="%d일"),
+        "사전규격링크":  st.column_config.LinkColumn("바로가기",   display_text="→ 규격", width=80),
+        "수요기관":      st.column_config.TextColumn("수요기관"),
+        "담당자":        st.column_config.TextColumn("담당자",     width=80),
+        "담당자연락처":  st.column_config.TextColumn("연락처",     width=120),
+    }
+
+    row_h = 35
+    tbl_h = min(max(400, 38 + len(df) * row_h), 1400)
+    st.dataframe(df[show_cols], column_config=col_cfg, hide_index=True,
+                 use_container_width=True, height=tbl_h)
+
+    csv = data.to_csv(index=False, encoding="utf-8-sig")
+    st.download_button(
+        "⬇️ CSV로 저장",
+        data=csv,
+        file_name=f"나라장터_사전규격_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv",
+        key=f"ps_csv_{tab_key}",
     )
 
 
@@ -316,7 +401,7 @@ if submitted:
         st.error("🔑 API 키를 입력해주세요. 위의 'API 키 설정'을 열어 입력하세요.")
         st.stop()
 
-    with st.spinner("나라장터에서 공고를 가져오는 중..."):
+    with st.spinner("나라장터에서 입찰공고 및 사전규격을 가져오는 중..."):
         df = fetch_notices(
             api_key=api_key,
             keywords=keywords,
@@ -324,7 +409,15 @@ if submitted:
             days=days,
             exclude_words=exclude_words,
         )
+        df_prespec = fetch_prespec(
+            api_key=api_key,
+            keywords=keywords,
+            min_amount=min_amount,
+            days=days,
+            exclude_words=exclude_words,
+        )
     st.session_state.df           = df
+    st.session_state.df_prespec   = df_prespec
     st.session_state.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 # ── 결과 표시 ─────────────────────────────────────────────────────
@@ -332,34 +425,35 @@ if "df" not in st.session_state:
     st.info("⬆️ 조회 조건을 입력하고 **공고 조회** 버튼을 눌러주세요.")
     st.stop()
 
-df: pd.DataFrame = st.session_state.df
-
 if "last_updated" in st.session_state:
     st.caption(f"조회 시각: {st.session_state.last_updated}")
 
-st.caption("💡 **공고 링크**: 나라장터 **로그아웃** 상태에서 클릭하면 공고 페이지로 바로 이동합니다. 로그인 상태라면 공고번호로 직접 검색하세요.")
+st.caption("💡 **링크**: 나라장터 **로그아웃** 상태에서 클릭하면 페이지로 바로 이동합니다. 로그인 상태라면 번호로 직접 검색하세요.")
 
-if df.empty:
-    st.warning("조건에 맞는 공고가 없습니다. 키워드나 기간을 조정해보세요.")
-    st.stop()
-
-# ── 요약 카드 ────────────────────────────────────────────────────
 today = datetime.now()
-df = df.copy()
-df["마감D-Day"] = df["입찰마감"].apply(
-    lambda x: int((pd.to_datetime(x, errors="coerce") - today).days)
-    if pd.notnull(pd.to_datetime(x, errors="coerce")) else None
-)
 
-# 마감일 지난 공고 제외
-df = df[df["마감D-Day"].isna() | (df["마감D-Day"] >= 0)]
+top_tab1, top_tab2 = st.tabs(["📋 입찰공고", "📑 사전규격"])
 
-total        = len(df)
-d3           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 3) & (df["마감D-Day"] >= 0)).sum())
-d7           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)).sum())
-total_amount = df["추정가격"].sum()
+# ── 입찰공고 탭 ──────────────────────────────────────────────────
+with top_tab1:
+    df: pd.DataFrame = st.session_state.df
 
-st.markdown(f"""
+    if df.empty:
+        st.warning("조건에 맞는 입찰공고가 없습니다. 키워드나 기간을 조정해보세요.")
+    else:
+        df = df.copy()
+        df["마감D-Day"] = df["입찰마감"].apply(
+            lambda x: int((pd.to_datetime(x, errors="coerce") - today).days)
+            if pd.notnull(pd.to_datetime(x, errors="coerce")) else None
+        )
+        df = df[df["마감D-Day"].isna() | (df["마감D-Day"] >= 0)]
+
+        total        = len(df)
+        d3           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 3) & (df["마감D-Day"] >= 0)).sum())
+        d7           = int((df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)).sum())
+        total_amount = df["추정가격"].sum()
+
+        st.markdown(f"""
 <div class="metrics-grid">
   <div class="metric-card">
     <p class="metric-title">전체 공고 수</p>
@@ -380,20 +474,83 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-st.divider()
+        st.divider()
 
-tab1, tab2, tab3 = st.tabs(["📋 전체 목록", "🚨 마감 임박 (7일)", "📊 통계"])
+        tab1, tab2, tab3 = st.tabs(["📋 전체 목록", "🚨 마감 임박 (7일)", "📊 통계"])
 
-with tab1:
-    show_table(df, show_all=True)
+        with tab1:
+            show_table(df, show_all=True)
 
-with tab2:
-    urgent = df[df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)].sort_values("마감D-Day")
-    if urgent.empty:
-        st.success("✅ 7일 이내 마감 공고가 없습니다.")
+        with tab2:
+            urgent = df[df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)].sort_values("마감D-Day")
+            if urgent.empty:
+                st.success("✅ 7일 이내 마감 공고가 없습니다.")
+            else:
+                st.warning(f"마감 7일 이내 공고 **{len(urgent)}건** — 빨리 확인하세요!")
+                show_table(urgent, show_all=False)
+
+        with tab3:
+            show_stats(df)
+
+# ── 사전규격 탭 ──────────────────────────────────────────────────
+with top_tab2:
+    df_ps: pd.DataFrame = st.session_state.get("df_prespec", pd.DataFrame())
+
+    if df_ps.empty:
+        st.warning("조건에 맞는 사전규격이 없습니다. 키워드나 기간을 조정해보세요.")
     else:
-        st.warning(f"마감 7일 이내 공고 **{len(urgent)}건** — 빨리 확인하세요!")
-        show_table(urgent, show_all=False)
+        df_ps = df_ps.copy()
+        df_ps["마감D-Day"] = df_ps["의견접수마감"].apply(
+            lambda x: int((pd.to_datetime(x, errors="coerce") - today).days)
+            if pd.notnull(pd.to_datetime(x, errors="coerce")) else None
+        ) if "의견접수마감" in df_ps.columns else None
 
-with tab3:
-    show_stats(df)
+        if "마감D-Day" in df_ps.columns:
+            df_ps = df_ps[df_ps["마감D-Day"].isna() | (df_ps["마감D-Day"] >= 0)]
+
+        ps_total  = len(df_ps)
+        ps_d3     = int((df_ps["마감D-Day"].notna() & (df_ps["마감D-Day"] <= 3) & (df_ps["마감D-Day"] >= 0)).sum()) if "마감D-Day" in df_ps.columns else 0
+        ps_d7     = int((df_ps["마감D-Day"].notna() & (df_ps["마감D-Day"] <= 7) & (df_ps["마감D-Day"] >= 0)).sum()) if "마감D-Day" in df_ps.columns else 0
+        ps_amount = df_ps["추정가격"].sum() if "추정가격" in df_ps.columns else 0
+
+        st.markdown(f"""
+<div class="metrics-grid">
+  <div class="metric-card">
+    <p class="metric-title">전체 사전규격 수</p>
+    <p class="metric-value">{ps_total}건</p>
+  </div>
+  <div class="metric-card deadline-critical">
+    <p class="metric-title">의견마감 3일 이내 🚨</p>
+    <p class="metric-value">{ps_d3}건</p>
+  </div>
+  <div class="metric-card deadline-soon">
+    <p class="metric-title">의견마감 7일 이내 ⚠️</p>
+    <p class="metric-value">{ps_d7}건</p>
+  </div>
+  <div class="metric-card amount-card" style="color:#065f46;">
+    <p class="metric-title">총 추정가격</p>
+    <p class="metric-value" style="color:#065f46;">{ps_amount/100_000_000:.1f}억</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        st.divider()
+
+        ps_tab1, ps_tab2, ps_tab3 = st.tabs(["📑 전체 목록", "🚨 의견마감 임박 (7일)", "📊 통계"])
+
+        with ps_tab1:
+            show_prespec_table(df_ps, tab_key="all")
+
+        with ps_tab2:
+            if "마감D-Day" in df_ps.columns:
+                urgent_ps = df_ps[df_ps["마감D-Day"].notna() & (df_ps["마감D-Day"] <= 7) & (df_ps["마감D-Day"] >= 0)].sort_values("마감D-Day")
+                if urgent_ps.empty:
+                    st.success("✅ 7일 이내 의견마감 사전규격이 없습니다.")
+                else:
+                    st.warning(f"의견마감 7일 이내 사전규격 **{len(urgent_ps)}건** — 빨리 확인하세요!")
+                    show_prespec_table(urgent_ps, tab_key="urg")
+            else:
+                st.info("의견접수마감 정보가 없습니다.")
+
+        with ps_tab3:
+            show_stats(df_ps)

@@ -1,9 +1,10 @@
-"""나라장터 입찰공고 API 클라이언트"""
+"""나라장터 입찰공고 / 사전규격 API 클라이언트"""
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
 
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
+PRESPEC_URL = "http://apis.data.go.kr/1230000/PreSpecPublicInfoService/getPreSpecPublicInfoListServcPPSSrch"
 
 # 응답 필드 → 한글 컬럼명 매핑
 FIELD_MAP = {
@@ -22,6 +23,20 @@ FIELD_MAP = {
     "srvceDivNm":          "용역구분",
     "bidMethdNm":          "입찰방법",
     "ntceKindNm":          "공고종류",
+}
+
+# 사전규격 응답 필드 → 한글 컬럼명 매핑
+PRESPEC_FIELD_MAP = {
+    "bfSpecRgstnNo":      "등록번호",
+    "bfSpecRgstnNm":      "사전규격명",
+    "ntceInsttNm":        "공고기관",
+    "dminsttNm":          "수요기관",
+    "presmptPrce":        "추정가격",
+    "bfSpecRgstnDt":      "공고일시",
+    "opninRcptDdlnDt":    "의견접수마감",
+    "ntceInsttOfclNm":    "담당자",
+    "ntceInsttOfclTelNo": "담당자연락처",
+    "bfSpecRegUrl":       "사전규격URL",
 }
 
 
@@ -95,6 +110,78 @@ def fetch_notices(
         df = df[~df["공고명"].str.contains(pattern, na=False)]
 
     # 공고일시 파싱 & 정렬
+    if "공고일시" in df.columns:
+        df["공고일시"] = pd.to_datetime(df["공고일시"], errors="coerce")
+        df = df.sort_values("공고일시", ascending=False)
+
+    return df.reset_index(drop=True)
+
+
+def fetch_prespec(
+    api_key: str,
+    keywords: list[str],
+    min_amount: int = 0,
+    days: int = 7,
+    exclude_words: list[str] | None = None,
+) -> pd.DataFrame:
+    """
+    나라장터 사전규격을 키워드별로 조회 후 필터링한 DataFrame 반환.
+    keywords : OR 검색 — 각 키워드마다 API 호출 후 합산
+    """
+    end_dt   = datetime.now()
+    start_dt = end_dt - timedelta(days=days)
+    bgnDt    = start_dt.strftime("%Y%m%d%H%M")
+    endDt    = end_dt.strftime("%Y%m%d%H%M")
+
+    all_rows: list[dict] = []
+
+    for kw in keywords:
+        page = 1
+        while True:
+            params = {
+                "ServiceKey":  api_key,
+                "type":        "json",
+                "numOfRows":   "100",
+                "pageNo":      str(page),
+                "inqryDiv":    "1",
+                "inqryBgnDt":  bgnDt,
+                "inqryEndDt":  endDt,
+                "bidNtceNm":   kw,
+            }
+            try:
+                resp = requests.get(PRESPEC_URL, params=params, timeout=15)
+                resp.raise_for_status()
+                body = resp.json().get("response", {}).get("body", {})
+                items = body.get("items") or []
+                if not items:
+                    break
+                all_rows.extend(items)
+                total = int(body.get("totalCount", 0))
+                if page * 100 >= total:
+                    break
+                page += 1
+            except Exception as e:
+                print(f"[사전규격 API 오류] 키워드={kw} 페이지={page}: {e}")
+                break
+
+    if not all_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_rows)
+    df = df.rename(columns={k: v for k, v in PRESPEC_FIELD_MAP.items() if k in df.columns})
+
+    if "등록번호" in df.columns:
+        df = df.drop_duplicates(subset=["등록번호"])
+
+    if "추정가격" in df.columns:
+        df["추정가격"] = pd.to_numeric(df["추정가격"], errors="coerce").fillna(0).astype(int)
+        if min_amount > 0:
+            df = df[df["추정가격"] >= min_amount]
+
+    if exclude_words and "사전규격명" in df.columns:
+        pattern = "|".join(exclude_words)
+        df = df[~df["사전규격명"].str.contains(pattern, na=False)]
+
     if "공고일시" in df.columns:
         df["공고일시"] = pd.to_datetime(df["공고일시"], errors="coerce")
         df = df.sort_values("공고일시", ascending=False)
