@@ -304,23 +304,22 @@ def show_stats(data: pd.DataFrame):
 
 
 # ── 메인 ─────────────────────────────────────────────────────────
-st.title("📋 나라장터 입찰공고 대시보드")
+st.title("상상우리 나라장터 조회")
+
+# ── API 키: 사이드바에 숨김 ───────────────────────────────────────
+with st.sidebar:
+    st.subheader("🔑 API 키 설정")
+    api_key = st.text_input(
+        "공공데이터포털 API 키",
+        value=DEFAULT_API_KEY,
+        type="password",
+        placeholder="발급받은 API 키 입력",
+        help="data.go.kr → 나라장터 활용신청 후 발급한 Decoding 키",
+    )
 
 # ── 조회 폼 ──────────────────────────────────────────────────────
 with st.form("search_form"):
     st.subheader("🔍 조회 조건")
-
-    with st.expander("🔑 API 키 설정"):
-        api_key = st.text_input(
-            "공공데이터포털 API 키",
-            value=DEFAULT_API_KEY,
-            type="password",
-            placeholder="발급받은 API 키 입력",
-            help="data.go.kr → 나라장터 입찰공고정보서비스 활용신청 후 발급",
-        )
-        st.markdown("""
-**발급 방법**: [data.go.kr](https://www.data.go.kr) 로그인 → `나라장터 입찰공고` 검색 → 활용신청 → 마이페이지 → 인증키 관리 → `Decoding 키` 복사
-        """)
 
     p1_kws, p2_kws, p3_kws = load_keyword_presets()
 
@@ -364,7 +363,7 @@ with st.form("search_form"):
     with c1:
         min_amount_man = st.number_input(
             "최소 추정가격 (만원, 0=전체)",
-            value=0, min_value=0, step=500,
+            value=5000, min_value=0, step=500,
         )
     with c2:
         days = st.number_input(
@@ -395,7 +394,7 @@ if submitted:
     min_amount   = min_amount_man * 10_000
 
     if not api_key:
-        st.error("🔑 API 키를 입력해주세요. 위의 'API 키 설정'을 열어 입력하세요.")
+        st.error("🔑 API 키를 입력해주세요. 왼쪽 사이드바(☰)의 'API 키 설정'에 입력하세요.")
         st.stop()
 
     with st.spinner("나라장터에서 입찰공고 및 사전규격을 가져오는 중..."):
