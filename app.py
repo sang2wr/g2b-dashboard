@@ -4,7 +4,14 @@ import pandas as pd
 from datetime import datetime
 import os
 
-from api_client import fetch_notices, fetch_prespec
+try:
+    from api_client import fetch_notices, fetch_prespec
+except Exception as _e:
+    import traceback as _tb
+    import streamlit as _st
+    _st.error(f"**Import 오류 (디버깅용):** `{type(_e).__name__}: {_e}`")
+    _st.code(_tb.format_exc())
+    _st.stop()
 
 
 @st.cache_data
