@@ -545,3 +545,135 @@ for kw in preset_kws + custom_kws:
 - GitHub push → Streamlit Cloud 자동 배포 완료
 
 *기록 추가일: 2026-06-29 (세션 7)*
+
+---
+
+## 2026-06-29 세션 8 — 사전규격 버그 수정 및 UI 개선
+
+### 1. 사전규격 API 필드명 수정
+
+**배경**: 세션 7에서 추가한 사전규격 탭이 실제 API 응답과 필드명이 달라 조회 오류 발생.
+
+**변경 내용 (`api_client.py`)**:
+- `PRESPEC_FIELD_MAP` 실제 응답 필드명으로 전면 수정
+  - `bfSpecRgstnNo` → `bfSpecRgstNo` (등록번호)
+  - `bfSpecRgstnNm` → `prdctClsfcNoNm` (사전규격명)
+  - `ntceInsttNm` → `orderInsttNm` (공고기관)
+  - `dminsttNm` → `rlDminsttNm` (수요기관)
+  - `presmptPrce` → `asignBdgtAmt` (추정가격)
+  - `bfSpecRgstnDt` → `rcptDt` (공고일시)
+  - `opninRcptDdlnDt` → `opninRgstClseDt` (의견접수마감)
+  - `bfSpecRegUrl` 제거 (사전규격 URL API 미제공)
+  - `bsnsDivNm` 추가 (업무구분)
+- PRESPEC_URL 엔드포인트 수정: `PreSpecPublicInfoService` → `HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch`
+- 키워드 필터를 `bidNtceNm` 파라미터 대신 클라이언트 사이드 `str.contains` 로 변경 (API가 키워드 파라미터 미지원)
+
+### 2. 사전규격 마감일 필터 제거
+
+- 의견접수 기간이 보통 5~7일이라 D-Day 필터 적용 시 대부분 필터링됨 → 마감일 기준 자동 제외 로직 제거
+- "의견마감 임박(7일)" 서브탭은 유지 (건 있을 때만 표시)
+
+### 3. 사전규격 바로가기 링크 개선
+
+- **1차**: 공개 목록 페이지(`/PNPBID_01`) → 링크 문제
+- **최종**: `specDocFileUrl1` ~ `specDocFileUrl5` 필드에서 첫 번째 유효 HTTP URL 사용 → 사양서 문서 직접 다운로드
+
+```python
+def _ps_url(row):
+    for i in range(1, 6):
+        url = str(row.get(f"specDocFileUrl{i}", "") or "")
+        if url.startswith("http"):
+            return url
+    return ""
+```
+
+### 4. UI/UX 개선
+
+| 항목 | 변경 전 | 변경 후 |
+|------|---------|---------|
+| 앱 제목 | "나라장터 공고 대시보드" | "상상우리 나라장터 조회" |
+| API 키 위치 | 메인 화면 폼 내부 | 사이드바(☰) 이동 → 화면 여백 확보 |
+| 기본 최소 추정가격 | 0원(전체) | 5,000만원 |
+| 업무구분 필터 | 없음 | 사전규격 탭 내 multiselect 추가 |
+| 사전규격 에러 안내 | 단순 에러 메시지 | 공공데이터포털 활용신청 단계별 안내 추가 |
+
+### 커밋 이력
+
+| 커밋 | 내용 |
+|------|------|
+| `86c5eef` | debug: import 오류 원인 확인용 try-except 추가 |
+| `fe4ebb5` | fix: 사전규격 API 엔드포인트 및 필드명 수정 |
+| `71a2114` | fix: 사전규격 필드명 및 키워드 필터링 방식 수정 |
+| `068c9d2` | fix: 사전규격 마감일 필터 제거 (의견기간 5~7일로 짧아 전부 걸러짐) |
+| `3549955` | fix: 사전규격 에러 표시, Python 호환성, 업무구분 필터 추가 |
+| `cefee4c` | ui: 제목 변경, API키 사이드바 이동, 기본 최소가격 5천만원 |
+| `22a9ea4` | fix: 입찰공고·사전규격 바로가기 링크 경로 수정 |
+| `9230c5e` | fix: 사전규격 바로가기를 공개 목록 페이지로 변경 |
+| `77997f5` | fix: 사전규격 바로가기를 specDocFileUrl1-5 직접 문서 링크로 변경 |
+
+*기록 추가일: 2026-06-30 (세션 8)*
+
+---
+
+## 2026-06-30 세션 9 — search.xlsx 4컬럼 반영 및 동적 멀티셀렉트
+
+### 변경 목적
+
+기존 `search.xlsx`는 `1순위 / 2순위 / 3순위` 3개 컬럼이었으나, **대표님** 컬럼이 첫 번째 열로 추가되어 4컬럼 구조로 변경됨.  
+기존 `app.py`는 컬럼을 인덱스(0,1,2)로 고정 읽어 3개만 로드하는 구조라 4컬럼을 제대로 반영하지 못함.  
+→ 컬럼 수에 관계없이 Excel 헤더 이름을 그대로 레이블로 사용하는 **동적 구조**로 전환.
+
+### search.xlsx 현재 구조
+
+| 대표님 (24개) | 1순위 (31개) | 2순위 (16개) | 3순위 (11개) |
+|-------------|-------------|-------------|-------------|
+| 일자리, 퇴직, 은퇴, 이직, 전직, 구직, 설계, 경력, 장년, 중년, 시니어, 부머, 노인, 어르신, 스마트, 경로당, 재취업, 취업, 창업, 멘토링, 인턴십, 사회적, 디지털, 박람회 | AI, 튜터, 경로당, 늘봄, 디지털, 청년, 포용, 리터러시, 시니어, 장년, 중년, 일자리, 경력, 단절, 은퇴, 퇴직, 퇴사, 재기, 도전, 전직, 취업, 경력, 노하우, 상생, 매칭, 프로보노, 재능, 어르신, 새싹, 노인, 고령 | 혁신, 사회적, 공간, 희망, 힐링, 체인지, 임팩트, 캠프, 격차, 부트, 제작, 기부, 스페이스, 메이커, 소셜벤처, 취약 | 시티즌, 엘더리, 40대, 50대, 60대, 40플러스, 50플러스, 60플러스, 연장자, 실버, 에이징 |
+
+### 변경 내용 (`app.py`)
+
+**`load_keyword_presets()` 리턴 구조 변경**:
+```python
+# 변경 전: 3개 리스트 고정 반환
+def load_keyword_presets():
+    p1 = df.iloc[:, 0].dropna()...
+    p2 = df.iloc[:, 1].dropna()...
+    p3 = df.iloc[:, 2].dropna()...
+    return p1, p2, p3
+
+# 변경 후: (컬럼명, 키워드목록) 튜플 리스트 — 컬럼 수 동적
+def load_keyword_presets():
+    result = []
+    for col in df.columns:
+        vals = df[col].dropna().astype(str).str.strip().tolist()
+        if vals:
+            result.append((str(col), vals))
+    return result
+```
+
+**UI 멀티셀렉트 동적 생성**:
+```python
+# 변경 전: 3개 하드코딩
+col_p1, col_p2, col_p3 = st.columns(3)
+sel1 = st.multiselect("🥇 1순위", options=p1_kws, ...)
+sel2 = st.multiselect("🥈 2순위", options=p2_kws, ...)
+sel3 = st.multiselect("🥉 3순위", options=p3_kws, ...)
+
+# 변경 후: 컬럼 수에 맞게 동적 생성
+grp_cols = st.columns(len(preset_groups))
+sel_all = []
+for i, (grp_name, options) in enumerate(preset_groups):
+    with grp_cols[i]:
+        sel = st.multiselect(grp_name, options=options, ..., key=f"ms_grp_{i}")
+        sel_all.extend(sel)
+```
+
+**키워드 집계**:
+```python
+# 변경 전
+preset_kws = sel1 + sel2 + sel3
+
+# 변경 후
+preset_kws = sel_all
+```
+
+*기록 추가일: 2026-06-30 (세션 9)*

@@ -9,16 +9,18 @@ from api_client import fetch_notices, fetch_prespec
 
 @st.cache_data
 def load_keyword_presets():
-    """search.xlsx에서 우선순위별 키워드 로드"""
+    """search.xlsx 모든 컬럼을 (컬럼명, 키워드목록) 튜플 리스트로 반환"""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search.xlsx")
     try:
         df = pd.read_excel(path)
-        p1 = df.iloc[:, 0].dropna().astype(str).str.strip().tolist()
-        p2 = df.iloc[:, 1].dropna().astype(str).str.strip().tolist()
-        p3 = df.iloc[:, 2].dropna().astype(str).str.strip().tolist()
-        return p1, p2, p3
+        result = []
+        for col in df.columns:
+            vals = df[col].dropna().astype(str).str.strip().tolist()
+            if vals:
+                result.append((str(col), vals))
+        return result
     except Exception:
-        return [], [], []
+        return []
 
 def _load_env_key() -> str:
     try:
@@ -322,37 +324,24 @@ with st.sidebar:
 with st.form("search_form"):
     st.subheader("🔍 조회 조건")
 
-    p1_kws, p2_kws, p3_kws = load_keyword_presets()
+    preset_groups = load_keyword_presets()
 
-    if p1_kws or p2_kws or p3_kws:
+    if preset_groups:
         st.markdown("**🔖 우선순위별 키워드 선택** (OR 검색 — 선택한 키워드 중 하나라도 포함된 공고 조회)")
-        col_p1, col_p2, col_p3 = st.columns(3)
-        with col_p1:
-            sel1 = st.multiselect(
-                "🥇 1순위",
-                options=p1_kws,
-                default=[],
-                help="핵심 키워드 — 이 중 하나 이상 포함 시 우선 조회",
-                placeholder="1순위 키워드 선택...",
-            )
-        with col_p2:
-            sel2 = st.multiselect(
-                "🥈 2순위",
-                options=p2_kws,
-                default=[],
-                help="보조 키워드",
-                placeholder="2순위 키워드 선택...",
-            )
-        with col_p3:
-            sel3 = st.multiselect(
-                "🥉 3순위",
-                options=p3_kws,
-                default=[],
-                help="참고 키워드",
-                placeholder="3순위 키워드 선택...",
-            )
+        grp_cols = st.columns(len(preset_groups))
+        sel_all = []
+        for i, (grp_name, options) in enumerate(preset_groups):
+            with grp_cols[i]:
+                sel = st.multiselect(
+                    grp_name,
+                    options=options,
+                    default=[],
+                    placeholder=f"{grp_name} 선택...",
+                    key=f"ms_grp_{i}",
+                )
+                sel_all.extend(sel)
     else:
-        sel1, sel2, sel3 = [], [], []
+        sel_all = []
 
     kw_input = st.text_input(
         "추가 키워드 (쉼표로 구분, OR 검색)",
@@ -382,7 +371,7 @@ with st.form("search_form"):
 
 # ── 조회 처리 ─────────────────────────────────────────────────────
 if submitted:
-    preset_kws   = sel1 + sel2 + sel3
+    preset_kws   = sel_all
     custom_kws   = [k.strip() for k in kw_input.split(",") if k.strip()]
     # 중복 제거, 순서 유지 (1순위 → 2순위 → 3순위 → 추가)
     seen = set()
