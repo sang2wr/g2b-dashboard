@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
-PRESPEC_URL = "http://apis.data.go.kr/1230000/PreSpecPublicInfoService/getPreSpecPublicInfoListServcPPSSrch"
+PRESPEC_URL = "http://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
 
 # 응답 필드 → 한글 컬럼명 매핑
 FIELD_MAP = {
@@ -27,16 +27,16 @@ FIELD_MAP = {
 
 # 사전규격 응답 필드 → 한글 컬럼명 매핑
 PRESPEC_FIELD_MAP = {
-    "bfSpecRgstnNo":      "등록번호",
-    "bfSpecRgstnNm":      "사전규격명",
-    "ntceInsttNm":        "공고기관",
+    "bfSpecRgstNo":       "등록번호",
+    "prdctClsfcNoNm":     "사전규격명",
+    "orderInsttNm":       "공고기관",
     "dminsttNm":          "수요기관",
-    "presmptPrce":        "추정가격",
-    "bfSpecRgstnDt":      "공고일시",
-    "opninRcptDdlnDt":    "의견접수마감",
+    "asignBdgtAmt":       "추정가격",
+    "presmptPrce":        "추정가격2",   # 있는 경우 병합용
+    "bfSpecRgstDt":       "공고일시",
+    "opninRgstClseDt":    "의견접수마감",
     "ntceInsttOfclNm":    "담당자",
     "ntceInsttOfclTelNo": "담당자연락처",
-    "bfSpecRegUrl":       "사전규격URL",
 }
 
 
@@ -146,13 +146,15 @@ def fetch_prespec(
                 "inqryDiv":    "1",
                 "inqryBgnDt":  bgnDt,
                 "inqryEndDt":  endDt,
-                "bidNtceNm":   kw,
+                "prdctNm":     kw,
             }
             try:
                 resp = requests.get(PRESPEC_URL, params=params, timeout=15)
                 resp.raise_for_status()
                 body = resp.json().get("response", {}).get("body", {})
                 items = body.get("items") or []
+                if isinstance(items, dict):
+                    items = [items]
                 if not items:
                     break
                 all_rows.extend(items)
@@ -169,6 +171,15 @@ def fetch_prespec(
 
     df = pd.DataFrame(all_rows)
     df = df.rename(columns={k: v for k, v in PRESPEC_FIELD_MAP.items() if k in df.columns})
+
+    # presmptPrce가 있으면 asignBdgtAmt 대신 사용
+    if "추정가격2" in df.columns:
+        mask = df["추정가격2"].notna() & (df["추정가격2"] != "")
+        if "추정가격" not in df.columns:
+            df["추정가격"] = df["추정가격2"]
+        else:
+            df.loc[mask, "추정가격"] = df.loc[mask, "추정가격2"]
+        df = df.drop(columns=["추정가격2"])
 
     if "등록번호" in df.columns:
         df = df.drop_duplicates(subset=["등록번호"])

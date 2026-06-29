@@ -4,14 +4,7 @@ import pandas as pd
 from datetime import datetime
 import os
 
-try:
-    from api_client import fetch_notices, fetch_prespec
-except Exception as _e:
-    import traceback as _tb
-    import streamlit as _st
-    _st.error(f"**Import 오류 (디버깅용):** `{type(_e).__name__}: {_e}`")
-    _st.code(_tb.format_exc())
-    _st.stop()
+from api_client import fetch_notices, fetch_prespec
 
 
 @st.cache_data
@@ -504,7 +497,13 @@ with top_tab2:
     df_ps: pd.DataFrame = st.session_state.get("df_prespec", pd.DataFrame())
 
     if df_ps.empty:
-        st.warning("조건에 맞는 사전규격이 없습니다. 키워드나 기간을 조정해보세요.")
+        st.warning("조건에 맞는 사전규격이 없습니다.")
+        st.info("""**사전규격 데이터가 없다면 API 활용신청을 확인하세요.**
+1. [공공데이터포털](https://www.data.go.kr) 로그인
+2. **"조달청 나라장터 사전규격정보서비스"** 검색 → 활용신청
+3. 입찰공고 API와 **별도 신청** 필요 (같은 키 사용 가능)
+4. 승인 후 마이페이지 → 개발계정 → `Decoding 키` 확인""")
+
     else:
         df_ps = df_ps.copy()
         df_ps["마감D-Day"] = df_ps["의견접수마감"].apply(
