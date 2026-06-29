@@ -108,17 +108,15 @@ def _amt_str(amt) -> str:
         return "-"
 
 
-G2B_LINK_BASE    = "https://www.g2b.go.kr/link/PNPE027_01/single/"
-PRESPEC_LINK_BASE = "https://www.g2b.go.kr/link/PNPE028_01/single/"
+PRESPEC_LINK_BASE = "https://www.g2b.go.kr/link/PNSY028_01/single/"
 
 
 def show_table(data: pd.DataFrame, show_all: bool = True):
     df = data.copy()
 
     def _g2b_url(row):
-        bid_no  = str(row.get("공고번호", "") or "")
-        bid_ord = str(row.get("bidNtceOrd", "000") or "000")
-        return f"{G2B_LINK_BASE}?bidPbancNo={bid_no}&bidPbancOrd={bid_ord}" if bid_no else ""
+        url = str(row.get("공고URL", "") or "")
+        return url if url.startswith("http") else ""
 
     df["공고링크"] = df.apply(_g2b_url, axis=1)
     df["추정가격_표시"] = df["추정가격"].apply(_amt_str)
