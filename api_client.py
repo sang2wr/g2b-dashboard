@@ -1,4 +1,5 @@
 """나라장터 입찰공고 / 사전규격 API 클라이언트"""
+from __future__ import annotations
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
@@ -123,10 +124,11 @@ def fetch_prespec(
     min_amount: int = 0,
     days: int = 7,
     exclude_words: list[str] | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, str | None, int]:
     """
     나라장터 사전규격 조회.
     API가 키워드 파라미터를 지원하지 않으므로 날짜 범위로 전체 조회 후 클라이언트 필터링.
+    반환: (DataFrame, 에러메시지|None, API에서_가져온_원본건수)
     """
     end_dt   = datetime.now()
     start_dt = end_dt - timedelta(days=days)
@@ -134,6 +136,7 @@ def fetch_prespec(
     endDt    = end_dt.strftime("%Y%m%d%H%M")
 
     all_rows: list[dict] = []
+    error_msg: str | None = None
     page = 1
     while True:
         params = {
@@ -146,9 +149,16 @@ def fetch_prespec(
             "inqryEndDt":  endDt,
         }
         try:
-            resp = requests.get(PRESPEC_URL, params=params, timeout=15)
+            resp = requests.get(PRESPEC_URL, params=params, timeout=20)
             resp.raise_for_status()
-            body = resp.json().get("response", {}).get("body", {})
+            data = resp.json()
+            header = data.get("response", {}).get("header", {})
+            result_code = str(header.get("resultCode", "00"))
+            if result_code not in ("00", "0"):
+                result_msg = header.get("resultMsg", "알 수 없는 오류")
+                error_msg = f"API 오류 [{result_code}]: {result_msg}"
+                break
+            body = data.get("response", {}).get("body", {})
             items = body.get("items") or []
             if isinstance(items, dict):
                 items = [items]
@@ -159,12 +169,20 @@ def fetch_prespec(
             if page * 100 >= total:
                 break
             page += 1
+        except requests.exceptions.Timeout:
+            error_msg = f"API 응답 시간 초과 (페이지 {page})"
+            break
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"HTTP 오류 {e.response.status_code} (페이지 {page})"
+            break
         except Exception as e:
-            print(f"[사전규격 API 오류] 페이지={page}: {e}")
+            error_msg = f"API 오류 페이지={page}: {type(e).__name__}: {e}"
             break
 
+    raw_count = len(all_rows)
+
     if not all_rows:
-        return pd.DataFrame()
+        return pd.DataFrame(), error_msg, 0
 
     df = pd.DataFrame(all_rows)
     df = df.rename(columns={k: v for k, v in PRESPEC_FIELD_MAP.items() if k in df.columns})
@@ -174,7 +192,8 @@ def fetch_prespec(
 
     # 키워드 OR 필터 (클라이언트 사이드)
     if keywords and "사전규격명" in df.columns:
-        pattern = "|".join(keywords)
+        import re as _re
+        pattern = "|".join(_re.escape(kw) for kw in keywords)
         df = df[df["사전규격명"].str.contains(pattern, case=False, na=False)]
 
     if "추정가격" in df.columns:
@@ -183,14 +202,15 @@ def fetch_prespec(
             df = df[df["추정가격"] >= min_amount]
 
     if exclude_words and "사전규격명" in df.columns:
-        pattern = "|".join(exclude_words)
-        df = df[~df["사전규격명"].str.contains(pattern, case=False, na=False)]
+        import re as _re
+        ex_pattern = "|".join(_re.escape(w) for w in exclude_words)
+        df = df[~df["사전규격명"].str.contains(ex_pattern, case=False, na=False)]
 
     if "공고일시" in df.columns:
         df["공고일시"] = pd.to_datetime(df["공고일시"], errors="coerce")
         df = df.sort_values("공고일시", ascending=False)
 
-    return df.reset_index(drop=True)
+    return df.reset_index(drop=True), error_msg, raw_count
 
 
 # ── 샘플 데이터 (API 키 없을 때) ─────────────────────────────────

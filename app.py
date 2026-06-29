@@ -406,16 +406,25 @@ if submitted:
             days=days,
             exclude_words=exclude_words,
         )
-        df_prespec = fetch_prespec(
-            api_key=api_key,
-            keywords=keywords,
-            min_amount=min_amount,
-            days=days,
-            exclude_words=exclude_words,
-        )
-    st.session_state.df           = df
-    st.session_state.df_prespec   = df_prespec
-    st.session_state.last_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            df_prespec, prespec_err, prespec_raw = fetch_prespec(
+                api_key=api_key,
+                keywords=keywords,
+                min_amount=min_amount,
+                days=days,
+                exclude_words=exclude_words,
+            )
+        except Exception as e:
+            df_prespec = pd.DataFrame()
+            prespec_err = f"fetch_prespec 실행 오류: {type(e).__name__}: {e}"
+            prespec_raw = 0
+
+    st.session_state.df              = df
+    st.session_state.df_prespec      = df_prespec
+    st.session_state.prespec_error   = prespec_err
+    st.session_state.prespec_raw     = prespec_raw
+    st.session_state.last_updated    = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.session_state.search_keywords = keywords
 
 # ── 결과 표시 ─────────────────────────────────────────────────────
 if "df" not in st.session_state:
@@ -492,31 +501,76 @@ with top_tab1:
 # ── 사전규격 탭 ──────────────────────────────────────────────────
 with top_tab2:
     df_ps: pd.DataFrame = st.session_state.get("df_prespec", pd.DataFrame())
+    prespec_err  = st.session_state.get("prespec_error")
+    prespec_raw  = st.session_state.get("prespec_raw", 0)
+    search_kws   = st.session_state.get("search_keywords", [])
 
-    if df_ps.empty:
-        st.warning("조건에 맞는 사전규격이 없습니다.")
-        st.info("""**사전규격 데이터가 없다면 API 활용신청을 확인하세요.**
+    # 에러 발생 시 명확하게 표시
+    if prespec_err:
+        st.error(f"사전규격 조회 오류: {prespec_err}")
+        st.info("""**API 오류가 발생했다면 활용신청을 확인하세요.**
 1. [공공데이터포털](https://www.data.go.kr) 로그인
 2. **"조달청 나라장터 사전규격정보서비스"** 검색 → 활용신청
-3. 입찰공고 API와 **별도 신청** 필요 (같은 키 사용 가능)
+3. 입찰공고 API와 **별도 신청** 필요 (같은 키 사용)
 4. 승인 후 마이페이지 → 개발계정 → `Decoding 키` 확인""")
 
-    else:
+    if df_ps.empty and not prespec_err:
+        if prespec_raw > 0:
+            st.warning(f"API에서 {prespec_raw:,}건을 가져왔으나 키워드 필터 후 결과가 없습니다. 키워드를 변경해보세요.")
+        else:
+            st.warning("조건에 맞는 사전규격이 없습니다. 기간을 늘리거나 키워드를 조정해보세요.")
+            if not prespec_err:
+                st.info("""**사전규격이 조회되지 않는다면:**
+1. [공공데이터포털](https://www.data.go.kr) → **"조달청 나라장터 사전규격정보서비스"** 활용신청 (입찰공고와 별도)
+2. 승인 후 동일한 API 키 사용 가능
+3. 활용 승인까지 최대 1~2일 소요""")
+
+    if not df_ps.empty:
         df_ps = df_ps.copy()
-        df_ps["마감D-Day"] = df_ps["의견접수마감"].apply(
-            lambda x: int((pd.to_datetime(x, errors="coerce") - today).days)
-            if pd.notnull(pd.to_datetime(x, errors="coerce")) else None
-        ) if "의견접수마감" in df_ps.columns else None
+
+        # 의견접수마감 D-Day 계산
+        if "의견접수마감" in df_ps.columns:
+            def _calc_dday(x):
+                try:
+                    ts = pd.to_datetime(x, errors="coerce")
+                    if pd.isnull(ts):
+                        return None
+                    delta = ts.replace(tzinfo=None) - today
+                    return delta.days
+                except Exception:
+                    return None
+            df_ps["마감D-Day"] = df_ps["의견접수마감"].apply(_calc_dday)
+        else:
+            df_ps["마감D-Day"] = None
+
+        # 업무구분 필터 (사전규격 탭 내)
+        if "업무구분" in df_ps.columns:
+            biz_types = sorted(df_ps["업무구분"].dropna().unique().tolist())
+            if biz_types:
+                sel_biz = st.multiselect(
+                    "업무구분 필터",
+                    options=biz_types,
+                    default=[],
+                    placeholder="전체 (선택하면 해당 구분만 표시)",
+                    key="ps_biz_filter",
+                )
+                if sel_biz:
+                    df_ps = df_ps[df_ps["업무구분"].isin(sel_biz)]
+
+        # 검색 키워드 표시
+        if search_kws:
+            st.caption(f"검색 키워드: {', '.join(search_kws)} | API 조회 {prespec_raw:,}건 → 키워드 필터 후 {len(df_ps):,}건")
 
         ps_total  = len(df_ps)
-        ps_d3     = int((df_ps["마감D-Day"].notna() & (df_ps["마감D-Day"] <= 3) & (df_ps["마감D-Day"] >= 0)).sum()) if "마감D-Day" in df_ps.columns else 0
-        ps_d7     = int((df_ps["마감D-Day"].notna() & (df_ps["마감D-Day"] <= 7) & (df_ps["마감D-Day"] >= 0)).sum()) if "마감D-Day" in df_ps.columns else 0
-        ps_amount = df_ps["추정가격"].sum() if "추정가격" in df_ps.columns else 0
+        d_col     = "마감D-Day"
+        ps_d3     = int((df_ps[d_col].notna() & (df_ps[d_col] <= 3)  & (df_ps[d_col] >= 0)).sum()) if d_col in df_ps.columns else 0
+        ps_d7     = int((df_ps[d_col].notna() & (df_ps[d_col] <= 7)  & (df_ps[d_col] >= 0)).sum()) if d_col in df_ps.columns else 0
+        ps_amount = int(df_ps["추정가격"].sum()) if "추정가격" in df_ps.columns else 0
 
         st.markdown(f"""
 <div class="metrics-grid">
   <div class="metric-card">
-    <p class="metric-title">전체 사전규격 수</p>
+    <p class="metric-title">전체 사전규격</p>
     <p class="metric-value">{ps_total}건</p>
   </div>
   <div class="metric-card deadline-critical">
@@ -542,15 +596,18 @@ with top_tab2:
             show_prespec_table(df_ps, tab_key="all")
 
         with ps_tab2:
-            if "마감D-Day" in df_ps.columns:
-                urgent_ps = df_ps[df_ps["마감D-Day"].notna() & (df_ps["마감D-Day"] <= 7) & (df_ps["마감D-Day"] >= 0)].sort_values("마감D-Day")
-                if urgent_ps.empty:
-                    st.success("✅ 7일 이내 의견마감 사전규격이 없습니다.")
-                else:
-                    st.warning(f"의견마감 7일 이내 사전규격 **{len(urgent_ps)}건** — 빨리 확인하세요!")
-                    show_prespec_table(urgent_ps, tab_key="urg")
+            urgent_ps = df_ps[
+                df_ps["마감D-Day"].notna() &
+                (df_ps["마감D-Day"] <= 7) &
+                (df_ps["마감D-Day"] >= 0)
+            ].sort_values("마감D-Day") if "마감D-Day" in df_ps.columns else pd.DataFrame()
+
+            if urgent_ps.empty:
+                st.success("✅ 7일 이내 의견마감 사전규격이 없습니다.")
+                st.caption("의견접수 기간이 보통 5~7일이므로, 이미 마감된 건이 많을 수 있습니다. 전체 목록 탭을 확인하세요.")
             else:
-                st.info("의견접수마감 정보가 없습니다.")
+                st.warning(f"의견마감 7일 이내 사전규격 **{len(urgent_ps)}건** — 빨리 확인하세요!")
+                show_prespec_table(urgent_ps, tab_key="urg")
 
         with ps_tab3:
             show_stats(df_ps)
