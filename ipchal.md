@@ -489,3 +489,59 @@ for kw in preset_kws + custom_kws:
 - GitHub push → Streamlit Cloud 자동 배포 완료
 
 *기록 추가일: 2026-06-29 (세션 6)*
+
+---
+
+## 2026-06-29 세션 7 — 사전규격정보서비스 검색 탭 추가
+
+### 변경 목적
+
+기존 입찰공고 검색에 더해, 나라장터 **사전규격정보서비스** 검색 기능 추가.
+동일한 키워드·기간·금액 조건으로 입찰공고와 사전규격을 동시에 조회.
+
+### API 정보
+
+- **엔드포인트**: `http://apis.data.go.kr/1230000/PreSpecPublicInfoService/getPreSpecPublicInfoListServcPPSSrch`
+- **파라미터**: 입찰공고와 동일 (`ServiceKey`, `type`, `numOfRows`, `pageNo`, `inqryDiv`, `inqryBgnDt`, `inqryEndDt`, `bidNtceNm`)
+- **주요 응답 필드**:
+  - `bfSpecRgstnNo` → 등록번호
+  - `bfSpecRgstnNm` → 사전규격명
+  - `ntceInsttNm` → 공고기관
+  - `dminsttNm` → 수요기관
+  - `presmptPrce` → 추정가격
+  - `bfSpecRgstnDt` → 공고일시 (등록일시)
+  - `opninRcptDdlnDt` → 의견접수마감
+  - `bfSpecRegUrl` → 사전규격URL
+
+### 주요 변경 내용
+
+**`api_client.py`**:
+- `PRESPEC_URL` 상수 추가
+- `PRESPEC_FIELD_MAP` 필드 매핑 추가
+- `fetch_prespec()` 함수 추가 (fetch_notices와 동일 구조)
+  - `등록번호` 기준 중복 제거
+  - 추정가격 필터 (min_amount > 0 일 때만 적용)
+  - 사전규격명 기준 제외 키워드 필터
+
+**`app.py`**:
+- `fetch_prespec` import 추가
+- `PRESPEC_LINK_BASE = "https://www.g2b.go.kr/link/PNPE028_01/single/"` 추가
+- `show_prespec_table()` 함수 추가
+  - 등록번호, 사전규격명, 의견마감일, 마감D-Day, 바로가기 링크 컬럼
+  - 의견마감 기준 D-Day 계산 및 마감 지난 항목 자동 제외
+  - 결과 내 검색, 정렬(의견마감/추정가격/등록일), CSV 다운로드
+- 결과 영역 구조 개편:
+  - 기존: 메트릭 + 탭(전체/마감임박/통계) 단일 구조
+  - 변경: **최상위 탭 "📋 입찰공고" / "📑 사전규격"** 으로 분리
+  - 각 탭 내 동일 구조: 메트릭 카드 + 서브탭(전체목록/마감임박/통계)
+- 공고 조회 시 입찰공고 + 사전규격 동시 조회
+
+### 커밋 및 배포
+
+| 커밋 | 내용 |
+|------|------|
+| `556c4bc` | feat: 사전규격정보서비스 검색 탭 추가 |
+
+- GitHub push → Streamlit Cloud 자동 배포 완료
+
+*기록 추가일: 2026-06-29 (세션 7)*
