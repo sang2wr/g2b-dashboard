@@ -41,52 +41,83 @@ PRESPEC_FIELD_MAP = {
 }
 
 
+# 실제 API 호출 테스트 결과 확인된 서비스별 1회 조회 최대 기간(일)
+# - BidPublicInfoService(입찰공고): 30일 초과 시 resultCode 07(입력범위 초과) 오류
+# - HrcspSsstndrdInfoService(사전규격): 365일까지는 정상, 366일부터 오류
+NOTICE_MAX_WINDOW_DAYS  = 30
+PRESPEC_MAX_WINDOW_DAYS = 365
+
+
+def _date_windows(start_dt: datetime, end_dt: datetime, max_days: int):
+    """(start_dt, end_dt) 구간을 max_days 이하 단위로 쪼갠 (구간시작, 구간끝) 리스트로 반환"""
+    windows = []
+    cur = start_dt
+    while cur < end_dt:
+        nxt = min(cur + timedelta(days=max_days), end_dt)
+        windows.append((cur, nxt))
+        cur = nxt
+    return windows or [(start_dt, end_dt)]
+
+
+def _resolve_date_range(days: int | None, start_date, end_date) -> tuple[datetime, datetime]:
+    """start_date/end_date(date) 지정 시 해당 기간, 없으면 days(최근 N일) 기준으로 (start_dt, end_dt) 반환"""
+    if start_date and end_date:
+        return datetime.combine(start_date, datetime.min.time()), datetime.combine(end_date, datetime.max.time())
+    end_dt = datetime.now()
+    return end_dt - timedelta(days=days or 7), end_dt
+
+
 def fetch_notices(
     api_key: str,
     keywords: list[str],
     min_amount: int = 10_000_000,
-    days: int = 7,
+    days: int | None = 7,
+    start_date=None,
+    end_date=None,
     exclude_words: list[str] | None = None,
 ) -> pd.DataFrame:
     """
     나라장터 용역 입찰공고를 키워드별로 조회 후 필터링한 DataFrame 반환.
     keywords : OR 검색 — 각 키워드마다 API 호출 후 합산
+    start_date/end_date(date) 지정 시 해당 기간 조회, 없으면 days(최근 N일) 사용.
+    조회기간이 30일을 넘으면 API 제한에 걸리므로 자동으로 30일 이하 구간으로 나누어 호출한다.
     """
-    end_dt   = datetime.now()
-    start_dt = end_dt - timedelta(days=days)
-    bgnDt    = start_dt.strftime("%Y%m%d%H%M")
-    endDt    = end_dt.strftime("%Y%m%d%H%M")
+    start_dt, end_dt = _resolve_date_range(days, start_date, end_date)
+    windows = _date_windows(start_dt, end_dt, NOTICE_MAX_WINDOW_DAYS)
 
     all_rows: list[dict] = []
 
     for kw in keywords:
-        page = 1
-        while True:
-            params = {
-                "ServiceKey":  api_key,
-                "type":        "json",
-                "numOfRows":   "100",
-                "pageNo":      str(page),
-                "inqryDiv":    "1",
-                "inqryBgnDt":  bgnDt,
-                "inqryEndDt":  endDt,
-                "bidNtceNm":   kw,
-            }
-            try:
-                resp = requests.get(BASE_URL, params=params, timeout=15)
-                resp.raise_for_status()
-                body = resp.json().get("response", {}).get("body", {})
-                items = body.get("items") or []
-                if not items:
+        for win_start, win_end in windows:
+            bgnDt = win_start.strftime("%Y%m%d%H%M")
+            endDt = win_end.strftime("%Y%m%d%H%M")
+            page = 1
+            while True:
+                params = {
+                    "ServiceKey":  api_key,
+                    "type":        "json",
+                    "numOfRows":   "100",
+                    "pageNo":      str(page),
+                    "inqryDiv":    "1",
+                    "inqryBgnDt":  bgnDt,
+                    "inqryEndDt":  endDt,
+                    "bidNtceNm":   kw,
+                }
+                try:
+                    resp = requests.get(BASE_URL, params=params, timeout=15)
+                    resp.raise_for_status()
+                    body = resp.json().get("response", {}).get("body", {})
+                    items = body.get("items") or []
+                    if not items:
+                        break
+                    all_rows.extend(items)
+                    total = int(body.get("totalCount", 0))
+                    if page * 100 >= total:
+                        break
+                    page += 1
+                except Exception as e:
+                    print(f"[API 오류] 키워드={kw} 페이지={page}: {e}")
                     break
-                all_rows.extend(items)
-                total = int(body.get("totalCount", 0))
-                if page * 100 >= total:
-                    break
-                page += 1
-            except Exception as e:
-                print(f"[API 오류] 키워드={kw} 페이지={page}: {e}")
-                break
 
     if not all_rows:
         return pd.DataFrame()
@@ -122,61 +153,69 @@ def fetch_prespec(
     api_key: str,
     keywords: list[str],
     min_amount: int = 0,
-    days: int = 7,
+    days: int | None = 7,
+    start_date=None,
+    end_date=None,
     exclude_words: list[str] | None = None,
 ) -> tuple[pd.DataFrame, str | None, int]:
     """
     나라장터 사전규격 조회.
     API가 키워드 파라미터를 지원하지 않으므로 날짜 범위로 전체 조회 후 클라이언트 필터링.
+    start_date/end_date(date) 지정 시 해당 기간 조회, 없으면 days(최근 N일) 사용.
+    조회기간이 365일을 넘으면 API 제한에 걸리므로 자동으로 365일 이하 구간으로 나누어 호출한다.
     반환: (DataFrame, 에러메시지|None, API에서_가져온_원본건수)
     """
-    end_dt   = datetime.now()
-    start_dt = end_dt - timedelta(days=days)
-    bgnDt    = start_dt.strftime("%Y%m%d%H%M")
-    endDt    = end_dt.strftime("%Y%m%d%H%M")
+    start_dt, end_dt = _resolve_date_range(days, start_date, end_date)
+    windows = _date_windows(start_dt, end_dt, PRESPEC_MAX_WINDOW_DAYS)
 
     all_rows: list[dict] = []
     error_msg: str | None = None
-    page = 1
-    while True:
-        params = {
-            "ServiceKey":  api_key,
-            "type":        "json",
-            "numOfRows":   "100",
-            "pageNo":      str(page),
-            "inqryDiv":    "1",
-            "inqryBgnDt":  bgnDt,
-            "inqryEndDt":  endDt,
-        }
-        try:
-            resp = requests.get(PRESPEC_URL, params=params, timeout=20)
-            resp.raise_for_status()
-            data = resp.json()
-            header = data.get("response", {}).get("header", {})
-            result_code = str(header.get("resultCode", "00"))
-            if result_code not in ("00", "0"):
-                result_msg = header.get("resultMsg", "알 수 없는 오류")
-                error_msg = f"API 오류 [{result_code}]: {result_msg}"
+
+    for win_start, win_end in windows:
+        bgnDt = win_start.strftime("%Y%m%d%H%M")
+        endDt = win_end.strftime("%Y%m%d%H%M")
+        page = 1
+        while True:
+            params = {
+                "ServiceKey":  api_key,
+                "type":        "json",
+                "numOfRows":   "100",
+                "pageNo":      str(page),
+                "inqryDiv":    "1",
+                "inqryBgnDt":  bgnDt,
+                "inqryEndDt":  endDt,
+            }
+            try:
+                resp = requests.get(PRESPEC_URL, params=params, timeout=20)
+                resp.raise_for_status()
+                data = resp.json()
+                header = data.get("response", {}).get("header", {})
+                result_code = str(header.get("resultCode", "00"))
+                if result_code not in ("00", "0"):
+                    result_msg = header.get("resultMsg", "알 수 없는 오류")
+                    error_msg = f"API 오류 [{result_code}]: {result_msg}"
+                    break
+                body = data.get("response", {}).get("body", {})
+                items = body.get("items") or []
+                if isinstance(items, dict):
+                    items = [items]
+                if not items:
+                    break
+                all_rows.extend(items)
+                total = int(body.get("totalCount", 0))
+                if page * 100 >= total:
+                    break
+                page += 1
+            except requests.exceptions.Timeout:
+                error_msg = f"API 응답 시간 초과 (페이지 {page})"
                 break
-            body = data.get("response", {}).get("body", {})
-            items = body.get("items") or []
-            if isinstance(items, dict):
-                items = [items]
-            if not items:
+            except requests.exceptions.HTTPError as e:
+                error_msg = f"HTTP 오류 {e.response.status_code} (페이지 {page})"
                 break
-            all_rows.extend(items)
-            total = int(body.get("totalCount", 0))
-            if page * 100 >= total:
+            except Exception as e:
+                error_msg = f"API 오류 페이지={page}: {type(e).__name__}: {e}"
                 break
-            page += 1
-        except requests.exceptions.Timeout:
-            error_msg = f"API 응답 시간 초과 (페이지 {page})"
-            break
-        except requests.exceptions.HTTPError as e:
-            error_msg = f"HTTP 오류 {e.response.status_code} (페이지 {page})"
-            break
-        except Exception as e:
-            error_msg = f"API 오류 페이지={page}: {type(e).__name__}: {e}"
+        if error_msg:
             break
 
     raw_count = len(all_rows)
