@@ -5,6 +5,7 @@ from datetime import datetime
 import os
 
 from api_client import fetch_notices, fetch_prespec
+import ui_theme
 
 
 @st.cache_data
@@ -44,61 +45,21 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-st.markdown("""
-<style>
-/* ── 메트릭 카드 ── */
-.metric-card {
-  background:#f0f4ff; border-left:4px solid #1a56db;
-  border-radius:8px; padding:14px 18px; margin-bottom:0;
-}
-.metric-title { font-size:13px; color:#6b7280; margin:0; }
-.metric-value { font-size:28px; font-weight:700; color:#1a56db; margin:4px 0 0; }
-.deadline-soon     { background:#fff3cd !important; border-left-color:#f59e0b !important; }
-.deadline-critical { background:#fee2e2 !important; border-left-color:#ef4444 !important; }
-.amount-card       { border-left-color:#065f46 !important; }
-
-/* ── 반응형 메트릭 그리드 ── */
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-/* ── 조회 폼 박스 ── */
-.search-box {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 20px 24px;
-  margin-bottom: 24px;
-}
-
-/* ── 모바일 공통 ── */
-@media (max-width: 768px) {
-  .metric-title { font-size: 12px; }
-  .metric-value { font-size: 22px; }
-
-  .stTabs [data-baseweb="tab"] {
-    font-size: 13px !important;
-    padding: 8px 8px !important;
-  }
-
-  .stButton > button {
-    min-height: 48px !important;
-    font-size: 16px !important;
-  }
-
-  .stTextInput > div > div > input,
-  .stTextArea textarea,
-  .stSelectbox > div > div {
-    font-size: 16px !important;
-  }
-
-  .stDataFrame { overflow-x: auto; }
-}
-</style>
-""", unsafe_allow_html=True)
+# 앱 고유 레이아웃 규칙(KPI 카드) — 색·크기는 공통 토큰(ui_theme.TOKENS)에 맞춤
+_EXTRA_CSS = """
+.metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.metric-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px 14px;box-shadow:0 1px 2px rgba(10,20,40,.04)}
+.metric-title{font-size:13px;font-weight:600;color:var(--ink-soft);margin:0}
+.metric-value{font-size:30px;font-weight:800;color:var(--navy);margin:4px 0 0;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.metric-card.deadline-critical{border-color:#F3C5C0}
+.metric-card.deadline-critical .metric-value{color:var(--danger)}
+.metric-card.deadline-soon{border-color:#F5D9B5}
+.metric-card.deadline-soon .metric-value{color:var(--warn)}
+.metric-card.amount-card .metric-value{color:var(--teal-dark)}
+.metric-card.rate-card .metric-value{color:var(--warn)}
+@media (max-width:768px){.metric-value{font-size:24px}.stDataFrame{overflow-x:auto}}
+"""
+ui_theme.inject(_EXTRA_CSS)
 
 
 # ── 헬퍼 함수 ────────────────────────────────────────────────────
@@ -187,7 +148,7 @@ def show_table(data: pd.DataFrame, show_all: bool = True):
 
     csv = data.to_csv(index=False, encoding="utf-8-sig")
     st.download_button(
-        "⬇️ CSV로 저장",
+        "⬇ CSV로 저장",
         data=csv,
         file_name=f"나라장터_공고_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         mime="text/csv",
@@ -271,7 +232,7 @@ def show_prespec_table(data: pd.DataFrame, tab_key: str = "all"):
 
     csv = data.to_csv(index=False, encoding="utf-8-sig")
     st.download_button(
-        "⬇️ CSV로 저장",
+        "⬇ CSV로 저장",
         data=csv,
         file_name=f"나라장터_사전규격_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         mime="text/csv",
@@ -285,7 +246,7 @@ def show_stats(data: pd.DataFrame):
     with col_a:
         st.subheader("공고기관별 건수 (상위 10)")
         if "공고기관" in data.columns:
-            st.bar_chart(data["공고기관"].value_counts().head(10))
+            st.bar_chart(data["공고기관"].value_counts().head(10), color=ui_theme.CHART_COLORS[0])
 
     with col_b:
         st.subheader("추정가격 구간별 분포")
@@ -295,7 +256,7 @@ def show_stats(data: pd.DataFrame):
                 bins=[0, 5e7, 1e8, 3e8, 5e8, float("inf")],
                 labels=["5천만↓", "5천~1억", "1~3억", "3~5억", "5억↑"],
             )
-            st.bar_chart(bins.value_counts().sort_index())
+            st.bar_chart(bins.value_counts().sort_index(), color=ui_theme.CHART_COLORS[0])
 
     if "공고일시" in data.columns:
         st.subheader("일자별 공고 건수")
@@ -303,7 +264,7 @@ def show_stats(data: pd.DataFrame):
             data.assign(날짜=data["공고일시"].dt.date)
             .groupby("날짜").size().rename("건수")
         )
-        st.bar_chart(daily)
+        st.bar_chart(daily, color=ui_theme.CHART_COLORS[0])
 
 
 # ── 메인 ─────────────────────────────────────────────────────────
@@ -311,7 +272,7 @@ st.title("상상우리 나라장터 조회")
 
 # ── API 키: 사이드바에 숨김 ───────────────────────────────────────
 with st.sidebar:
-    st.subheader("🔑 API 키 설정")
+    st.subheader("API 키 설정")
     api_key = st.text_input(
         "공공데이터포털 API 키",
         value=DEFAULT_API_KEY,
@@ -329,12 +290,12 @@ period_mode = st.radio(
 )
 
 with st.form("search_form"):
-    st.subheader("🔍 조회 조건")
+    st.subheader("조회 조건")
 
     preset_groups = load_keyword_presets()
 
     if preset_groups:
-        st.markdown("**🔖 우선순위별 키워드 선택** (OR 검색 — 선택한 키워드 중 하나라도 포함된 공고 조회)")
+        st.markdown("**우선순위별 키워드 선택** (OR 검색 — 선택한 키워드 중 하나라도 포함된 공고 조회)")
         grp_cols = st.columns(len(preset_groups))
         sel_all = []
         for i, (grp_name, options) in enumerate(preset_groups):
@@ -388,7 +349,7 @@ with st.form("search_form"):
         placeholder="예) 시담, 재공고",
     )
 
-    submitted = st.form_submit_button("🔄 공고 조회", use_container_width=True, type="primary")
+    submitted = st.form_submit_button("공고 조회", use_container_width=True, type="primary")
 
 # ── 조회 처리 ─────────────────────────────────────────────────────
 if submitted:
@@ -405,11 +366,11 @@ if submitted:
     min_amount   = min_amount_man * 10_000
 
     if not api_key:
-        st.error("🔑 API 키를 입력해주세요. 왼쪽 사이드바(☰)의 'API 키 설정'에 입력하세요.")
+        st.error("API 키를 입력해주세요. 왼쪽 사이드바(☰)의 'API 키 설정'에 입력하세요.")
         st.stop()
 
     if start_date and end_date and start_date > end_date:
-        st.error("📅 시작일이 종료일보다 늦습니다. 날짜를 다시 확인해주세요.")
+        st.error("시작일이 종료일보다 늦습니다. 날짜를 다시 확인해주세요.")
         st.stop()
 
     with st.spinner("나라장터에서 입찰공고 및 사전규격을 가져오는 중..."):
@@ -446,17 +407,17 @@ if submitted:
 
 # ── 결과 표시 ─────────────────────────────────────────────────────
 if "df" not in st.session_state:
-    st.info("⬆️ 조회 조건을 입력하고 **공고 조회** 버튼을 눌러주세요.")
+    st.info("조회 조건을 입력하고 **공고 조회** 버튼을 눌러주세요.")
     st.stop()
 
 if "last_updated" in st.session_state:
     st.caption(f"조회 시각: {st.session_state.last_updated}")
 
-st.caption("💡 **입찰공고 → 공고** 링크는 나라장터 공고 페이지로 이동합니다. **사전규격 → 문서** 링크는 규격 사양서(파일)를 직접 다운로드합니다.")
+st.caption("**입찰공고 → 공고** 링크는 나라장터 공고 페이지로 이동합니다. **사전규격 → 문서** 링크는 규격 사양서(파일)를 직접 다운로드합니다.")
 
 today = datetime.now()
 
-top_tab1, top_tab2 = st.tabs(["📋 입찰공고", "📑 사전규격"])
+top_tab1, top_tab2 = st.tabs(["입찰공고", "사전규격"])
 
 # ── 입찰공고 탭 ──────────────────────────────────────────────────
 with top_tab1:
@@ -484,23 +445,23 @@ with top_tab1:
     <p class="metric-value">{total}건</p>
   </div>
   <div class="metric-card deadline-critical">
-    <p class="metric-title">마감 3일 이내 🚨</p>
+    <p class="metric-title">마감 3일 이내</p>
     <p class="metric-value">{d3}건</p>
   </div>
   <div class="metric-card deadline-soon">
-    <p class="metric-title">마감 7일 이내 ⚠️</p>
+    <p class="metric-title">마감 7일 이내</p>
     <p class="metric-value">{d7}건</p>
   </div>
-  <div class="metric-card amount-card" style="color:#065f46;">
+  <div class="metric-card amount-card">
     <p class="metric-title">총 추정가격</p>
-    <p class="metric-value" style="color:#065f46;">{total_amount/100_000_000:.1f}억</p>
+    <p class="metric-value">{total_amount/100_000_000:.1f}억</p>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
         st.divider()
 
-        tab1, tab2, tab3 = st.tabs(["📋 전체 목록", "🚨 마감 임박 (7일)", "📊 통계"])
+        tab1, tab2, tab3 = st.tabs(["전체 목록", "마감 임박 (7일)", "통계"])
 
         with tab1:
             show_table(df, show_all=True)
@@ -508,7 +469,7 @@ with top_tab1:
         with tab2:
             urgent = df[df["마감D-Day"].notna() & (df["마감D-Day"] <= 7) & (df["마감D-Day"] >= 0)].sort_values("마감D-Day")
             if urgent.empty:
-                st.success("✅ 7일 이내 마감 공고가 없습니다.")
+                st.success("7일 이내 마감 공고가 없습니다.")
             else:
                 st.warning(f"마감 7일 이내 공고 **{len(urgent)}건** — 빨리 확인하세요!")
                 show_table(urgent, show_all=False)
@@ -592,23 +553,23 @@ with top_tab2:
     <p class="metric-value">{ps_total}건</p>
   </div>
   <div class="metric-card deadline-critical">
-    <p class="metric-title">의견마감 3일 이내 🚨</p>
+    <p class="metric-title">의견마감 3일 이내</p>
     <p class="metric-value">{ps_d3}건</p>
   </div>
   <div class="metric-card deadline-soon">
-    <p class="metric-title">의견마감 7일 이내 ⚠️</p>
+    <p class="metric-title">의견마감 7일 이내</p>
     <p class="metric-value">{ps_d7}건</p>
   </div>
-  <div class="metric-card amount-card" style="color:#065f46;">
+  <div class="metric-card amount-card">
     <p class="metric-title">총 추정가격</p>
-    <p class="metric-value" style="color:#065f46;">{ps_amount/100_000_000:.1f}억</p>
+    <p class="metric-value">{ps_amount/100_000_000:.1f}억</p>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
         st.divider()
 
-        ps_tab1, ps_tab2, ps_tab3 = st.tabs(["📑 전체 목록", "🚨 의견마감 임박 (7일)", "📊 통계"])
+        ps_tab1, ps_tab2, ps_tab3 = st.tabs(["전체 목록", "의견마감 임박 (7일)", "통계"])
 
         with ps_tab1:
             show_prespec_table(df_ps, tab_key="all")
@@ -621,7 +582,7 @@ with top_tab2:
             ].sort_values("마감D-Day") if "마감D-Day" in df_ps.columns else pd.DataFrame()
 
             if urgent_ps.empty:
-                st.success("✅ 7일 이내 의견마감 사전규격이 없습니다.")
+                st.success("7일 이내 의견마감 사전규격이 없습니다.")
                 st.caption("의견접수 기간이 보통 5~7일이므로, 이미 마감된 건이 많을 수 있습니다. 전체 목록 탭을 확인하세요.")
             else:
                 st.warning(f"의견마감 7일 이내 사전규격 **{len(urgent_ps)}건** — 빨리 확인하세요!")
