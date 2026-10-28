@@ -4,8 +4,18 @@ from urllib.parse import urlparse, parse_qs, unquote
 import requests
 import threading
 import socket
+import re
 
 PORT = 8502
+_NO_RE = re.compile(r"^[0-9A-Za-z-]{1,30}$")
+_ORD_RE = re.compile(r"^[0-9]{1,3}$")
+_ALLOWED_HOST = "www.g2b.go.kr"
+
+
+def _safe_target(url: str) -> bool:
+    """리다이렉트 대상은 https://www.g2b.go.kr 만 허용 (open redirect 방지)."""
+    p = urlparse(url)
+    return p.scheme == "https" and p.hostname == _ALLOWED_HOST
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -14,6 +24,8 @@ UA = (
 
 
 def resolve_notice_url(bid_no: str, bid_ord: str = "000") -> str:
+    if not _NO_RE.match(bid_no) or not _ORD_RE.match(bid_ord):
+        raise ValueError("invalid bid number")
     """SSO 첫 302 리다이렉트에서 base_uri(bodyDataKey 포함)를 추출해 반환.
     서버 사이드에서 호출 — 나라장터 쿠키가 없으므로 base_uri 경로로 분기됨."""
     src = (
@@ -28,7 +40,7 @@ def resolve_notice_url(bid_no: str, bid_ord: str = "000") -> str:
             sso_params = parse_qs(urlparse(r0.headers.get("Location", "")).query)
             base_uri_enc = sso_params.get("base_uri", [""])[0]
             if base_uri_enc:
-                return unquote(base_uri_enc)
+                return unquote(base_uri_enc) if _safe_target(unquote(base_uri_enc)) else src
     except Exception:
         pass
     return src  # 폴백: 직접 SSO 링크
@@ -41,7 +53,7 @@ class Handler(BaseHTTPRequestHandler):
             bid_no  = params.get("no",  [""])[0]
             bid_ord = params.get("ord", ["000"])[0]
 
-            if not bid_no:
+            if not _NO_RE.match(bid_no) or not _ORD_RE.match(bid_ord):
                 self.send_response(400); self.end_headers(); return
 
             src = (
@@ -63,28 +75,21 @@ class Handler(BaseHTTPRequestHandler):
                 if base_uri_enc:
                     target = unquote(base_uri_enc)  # bodyDataKey 포함, key 없음
 
+            if target and not _safe_target(target):
+                target = None
             if not target:
                 # 폴백: 전체 리다이렉트 따라가기
                 r = s.get(src, timeout=12, allow_redirects=True)
-                target = r.url
+                target = r.url if _safe_target(r.url) else src
 
             self.send_response(302)
             self.send_header("Location", target)
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
         except Exception:
             # 프록시가 g2b.go.kr에 연결 못할 때 직접 SSO 링크로 폴백
-            params = parse_qs(urlparse(self.path).query)
-            bid_no  = params.get("no",  [""])[0]
-            bid_ord = params.get("ord", ["000"])[0]
-            fallback = (
-                f"https://www.g2b.go.kr/link/PNPE027_01/single/"
-                f"?bidPbancNo={bid_no}&bidPbancOrd={bid_ord}"
-            )
-            self.send_response(302)
-            self.send_header("Location", fallback)
+            self.send_response(502)
             self.end_headers()
 
     def log_message(self, *args):
