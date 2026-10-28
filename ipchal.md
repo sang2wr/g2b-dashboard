@@ -20,8 +20,8 @@
 
 ## API 정보
 
-- **엔드포인트**: `http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch`
-- **API Key**: `fc7967b7c6bf52786fd564daeced70409bb05255b1739d1b4f2bf981bb4c6a8a`
+- **엔드포인트**: `https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch`
+- **API Key**: (비공개 — `.env` 또는 `.streamlit/secrets.toml`의 `G2B_API_KEY`로만 관리)
 - **주요 필드**:
   - `bidNtceNo` → 공고번호
   - `bidNtceNm` → 공고명
@@ -501,7 +501,7 @@ for kw in preset_kws + custom_kws:
 
 ### API 정보
 
-- **엔드포인트**: `http://apis.data.go.kr/1230000/PreSpecPublicInfoService/getPreSpecPublicInfoListServcPPSSrch`
+- **엔드포인트**: `https://apis.data.go.kr/1230000/PreSpecPublicInfoService/getPreSpecPublicInfoListServcPPSSrch`
 - **파라미터**: 입찰공고와 동일 (`ServiceKey`, `type`, `numOfRows`, `pageNo`, `inqryDiv`, `inqryBgnDt`, `inqryEndDt`, `bidNtceNm`)
 - **주요 응답 필드**:
   - `bfSpecRgstnNo` → 등록번호

@@ -30,10 +30,11 @@ def _load_env_key() -> str:
         pass
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     if os.path.exists(env_path):
-        for line in open(env_path, encoding="utf-8"):
-            line = line.strip()
-            if line.startswith("G2B_API_KEY="):
-                return line.split("=", 1)[1].strip()
+        with open(env_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("G2B_API_KEY="):
+                    return line.split("=", 1)[1].strip().strip("\"'")
     return ""
 
 DEFAULT_API_KEY = _load_env_key()
@@ -74,12 +75,23 @@ def _amt_str(amt) -> str:
 G2B_HOME = "https://www.g2b.go.kr"
 
 
+def _csv_safe(data: pd.DataFrame) -> pd.DataFrame:
+    """CSV 수식 삽입 방지: =,+,-,@ 로 시작하는 문자열 셀 앞에 ' 를 붙인다."""
+    out = data.copy()
+    for c in out.columns:
+        if out[c].dtype == object:
+            out[c] = out[c].map(
+                lambda v: "'" + v if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
+            )
+    return out
+
+
 def show_table(data: pd.DataFrame, show_all: bool = True):
     df = data.copy()
 
     def _g2b_url(row):
         url = str(row.get("공고URL", "") or "")
-        return url if url.startswith("http") else ""
+        return url if url.startswith(("http://", "https://")) else ""
 
     df["공고링크"] = df.apply(_g2b_url, axis=1)
     df["추정가격_표시"] = df["추정가격"].apply(_amt_str)
@@ -105,8 +117,8 @@ def show_table(data: pd.DataFrame, show_all: bool = True):
 
     if q:
         mask = (
-            df["공고명"].str.contains(q, case=False, na=False) |
-            df["공고기관"].str.contains(q, case=False, na=False)
+            df["공고명"].str.contains(q, case=False, na=False, regex=False) |
+            df["공고기관"].str.contains(q, case=False, na=False, regex=False)
         )
         df = df[mask]
         st.caption(f"'{q}' 필터 결과: {len(df):,}건")
@@ -146,7 +158,7 @@ def show_table(data: pd.DataFrame, show_all: bool = True):
     st.dataframe(df[show_cols], column_config=col_cfg, hide_index=True,
                  use_container_width=True, height=tbl_h)
 
-    csv = data.to_csv(index=False, encoding="utf-8-sig")
+    csv = _csv_safe(data).to_csv(index=False, encoding="utf-8-sig")
     st.download_button(
         "⬇ CSV로 저장",
         data=csv,
@@ -162,7 +174,7 @@ def show_prespec_table(data: pd.DataFrame, tab_key: str = "all"):
     def _ps_url(row):
         for i in range(1, 6):
             url = str(row.get(f"specDocFileUrl{i}", "") or "")
-            if url.startswith("http"):
+            if url.startswith(("http://", "https://")):
                 return url
         return ""
 
@@ -190,8 +202,8 @@ def show_prespec_table(data: pd.DataFrame, tab_key: str = "all"):
 
     if q:
         mask = (
-            df["사전규격명"].str.contains(q, case=False, na=False) |
-            df["공고기관"].str.contains(q, case=False, na=False)
+            df["사전규격명"].str.contains(q, case=False, na=False, regex=False) |
+            df["공고기관"].str.contains(q, case=False, na=False, regex=False)
         )
         df = df[mask]
         st.caption(f"'{q}' 필터 결과: {len(df):,}건")
@@ -230,7 +242,7 @@ def show_prespec_table(data: pd.DataFrame, tab_key: str = "all"):
     st.dataframe(df[show_cols], column_config=col_cfg, hide_index=True,
                  use_container_width=True, height=tbl_h)
 
-    csv = data.to_csv(index=False, encoding="utf-8-sig")
+    csv = _csv_safe(data).to_csv(index=False, encoding="utf-8-sig")
     st.download_button(
         "⬇ CSV로 저장",
         data=csv,
@@ -395,7 +407,7 @@ if submitted:
             )
         except Exception as e:
             df_prespec = pd.DataFrame()
-            prespec_err = f"fetch_prespec 실행 오류: {type(e).__name__}: {e}"
+            prespec_err = f"fetch_prespec 실행 오류: {type(e).__name__}"
             prespec_raw = 0
 
     st.session_state.df              = df

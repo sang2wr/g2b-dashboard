@@ -1,11 +1,22 @@
 """나라장터 입찰공고 / 사전규격 API 클라이언트"""
 from __future__ import annotations
+import re
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
 
-BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
-PRESPEC_URL = "http://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
+BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
+PRESPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
+
+def _safe_err(e: Exception, api_key: str) -> str:
+    """예외 메시지에 포함된 ServiceKey(원문/URL인코딩)를 마스킹한다."""
+    from urllib.parse import quote
+    msg = str(e)
+    for k in {api_key, quote(api_key, safe=""), quote(api_key)}:
+        if k:
+            msg = msg.replace(k, "***")
+    return re.sub(r"(?i)(servicekey=)[^&\s]+", r"\1***", msg)
+
 
 # 응답 필드 → 한글 컬럼명 매핑
 FIELD_MAP = {
@@ -116,7 +127,7 @@ def fetch_notices(
                         break
                     page += 1
                 except Exception as e:
-                    print(f"[API 오류] 키워드={kw} 페이지={page}: {e}")
+                    print(f"[API 오류] 키워드={kw} 페이지={page}: {type(e).__name__}: {_safe_err(e, api_key)}")
                     break
 
     if not all_rows:
@@ -138,7 +149,7 @@ def fetch_notices(
 
     # 제외 키워드 (공고명 기준)
     if exclude_words and "공고명" in df.columns:
-        pattern = "|".join(exclude_words)
+        pattern = "|".join(re.escape(w) for w in exclude_words)
         df = df[~df["공고명"].str.contains(pattern, na=False)]
 
     # 공고일시 파싱 & 정렬
@@ -210,10 +221,10 @@ def fetch_prespec(
                 error_msg = f"API 응답 시간 초과 (페이지 {page})"
                 break
             except requests.exceptions.HTTPError as e:
-                error_msg = f"HTTP 오류 {e.response.status_code} (페이지 {page})"
+                error_msg = f"HTTP 오류 {e.response.status_code if e.response is not None else '?'} (페이지 {page})"
                 break
             except Exception as e:
-                error_msg = f"API 오류 페이지={page}: {type(e).__name__}: {e}"
+                error_msg = f"API 오류 페이지={page}: {type(e).__name__}: {_safe_err(e, api_key)}"
                 break
         if error_msg:
             break
@@ -231,8 +242,7 @@ def fetch_prespec(
 
     # 키워드 OR 필터 (클라이언트 사이드)
     if keywords and "사전규격명" in df.columns:
-        import re as _re
-        pattern = "|".join(_re.escape(kw) for kw in keywords)
+        pattern = "|".join(re.escape(kw) for kw in keywords)
         df = df[df["사전규격명"].str.contains(pattern, case=False, na=False)]
 
     if "추정가격" in df.columns:
@@ -241,8 +251,7 @@ def fetch_prespec(
             df = df[df["추정가격"] >= min_amount]
 
     if exclude_words and "사전규격명" in df.columns:
-        import re as _re
-        ex_pattern = "|".join(_re.escape(w) for w in exclude_words)
+        ex_pattern = "|".join(re.escape(w) for w in exclude_words)
         df = df[~df["사전규격명"].str.contains(ex_pattern, case=False, na=False)]
 
     if "공고일시" in df.columns:
